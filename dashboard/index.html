@@ -3,16 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Token Radar — pre-token protocols ranked by implied value</title>
+<title>Token Radar — pre-token protocols priced off the traded curve</title>
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<a class="skip" href="#board">Skip to the board</a>
-<main id="board" tabindex="-1" aria-busy="true">
+<a class="skip" href="#main">Skip to the content</a>
+<main id="main" tabindex="-1" aria-busy="true">
   <p class="loading">Loading the board…</p>
   <noscript><p class="loading">Token Radar needs JavaScript: the board is rendered from the snapshot data beside this page.</p></noscript>
 </main>
 <p id="live" class="visually-hidden" aria-live="polite"></p>
+<dialog id="dlg" class="detail" aria-labelledby="dlg-title"></dialog>
 <script src="../data.js"></script>
 <script src="app.js"></script>
 </body>

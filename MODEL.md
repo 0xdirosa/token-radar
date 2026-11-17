@@ -1,17 +1,31 @@
-# Token Radar — Model Implied Value & Farm Plan (MODEL v2, `radar-2`)
+# Token Radar — Model Implied Value & Farm Plan (MODEL v3, `radar-3`)
 
-Analisis untuk bounty make.fun **token-radar-01** ($1.325). Snapshot: `input/snapshot.json`,
-`as_of` **2026-11-14**, floor watchlist **$50.000.000**, sumber DefiLlama
-`https://api.llama.fi/protocols`. Dokumen ini adalah rancangan model untuk builder —
-bukan kode entry, bukan submit, bukan tanda tangan apa pun.
+Analisis untuk bounty make.fun **token-radar-01** ($1.325). Snapshot:
+`input/snapshot.json`, `as_of` **2026-11-14**, floor watchlist
+**$50.000.000**, sumber DefiLlama `https://api.llama.fi/protocols`.
+Dokumen ini adalah rancangan model untuk builder — bukan kode entry, bukan
+submit, bukan tanda tangan apa pun. Semua angka di sini dihitung dari
+snapshot yang sama oleh `lib/model.ts` (`buildRadar` → `data.js` →
+`validation`); tidak ada angka yang ditulis tangan dari luar snapshot.
 
-**Ringkasan keputusan:** model `radar-2` = TVL × **multiple mcap/TVL peer per kategori
-(dengan shrinkage)** × momentum 7 hari × maturitas umur × jangkauan chain. Board
-**N = 178** (seluruh 40 watchlist + seluruh 138 pre-token di bawah floor yang lolos
-aturan watchlist). Board hanya berisi protokol **pre-token**; protokol bertoken
-ditampilkan terpisah sebagai pembanding (Live view), tidak masuk ranking. Nilai top
-**$1,96 miliar** (Steakhouse Financial), median **$4,5 juta**, minimum **$657.684**,
-monotonik menurun, 178 nilai berbeda.
+**Ringkasan keputusan:** model `radar-3` = **kurva ukuran log-log fitted
+(Huber) pada token yang sudah diperdagangkan** × **offset kategori yang
+di-shrink** × **growth 7 hari kecil**. Board **N = 198** (40 watchlist +
+20 di atas floor di luar watchlist + 138 early di bawah floor). Nilai top
+**$68,1 juta** (Sentora Curator), median **$7,12 juta**, minimum
+**$2,74 juta**, monotonik menurun, 198 nilai berbeda. Validasi
+out-of-sample: LOO miss **×3,28** vs flat **×5,02**; walk-forward
+**×2,40** vs flat **×4,83**. Band per baris adalah *blind band* dari
+residual LOO; rank range dari 200 bootstrap refits.
+
+Dibanding `radar-2` (MODEL v2): keluarga model diganti total. `radar-2`
+memakai TVL × multiple kategori linear tanpa size slope, sehingga
+Steakhouse Financial dinilai **$1,96 miliar**. Kurva log-log `radar-3`
+memberi Steakhouse **$67,4 juta** — dalam kisaran $28–126 juta yang
+dipakai semua 10 besar leaderboard (GAP-ANALYSIS.md §2–§4). Tidak ada
+satu pun konstanta `radar-2` yang bertahan: multiple kategori, maturity,
+dan chain multiplier semuanya dibuang; yang bertahan hanya aturan
+inklusi watchlist (§d) dan pemisahan Live view.
 
 ---
 
@@ -21,10 +35,18 @@ monotonik menurun, 178 nilai berbeda.
 |---|---|
 | Protokol di snapshot (TVL ≥ $5 jt) | 758 |
 | Watchlist (TVL ≥ $50 jt, tanpa token, bukan wrapped/staked/bridged/versioned) | 40 |
-| Pre-token di seluruh snapshot | 342 |
-| Bertoken (mcap/gecko/symbol tercatat) | 416 |
+| Pre-token di seluruh snapshot (mcap, gecko, symbol ketiganya null) | 342 |
+| Bertoken / mencatat token (gecko atau symbol non-null) | 416 |
+| Bertoken dengan mcap > 0 (calon peer) | 128 |
+| Peer yang dipakai fit (128 minus Bridge/Canonical Bridge/CEX) | 105 |
 | `change_7d` null | 4 dari 758 (watchlist: 0) |
-| `listed_at` null | 113 dari 758 (watchlist: 2 — Lightning Network, Noble) |
+| `listed_at` null | 113 dari 758 (watchlist: 2 — Lightning Network, Noble; board: 7) |
+
+**Akuntansi 758 protokol:** ranked **198** + bertoken **416** + set aside
+**144** = 758. Set aside 144 pre-token yang gagal aturan watchlist:
+CEX 42 · Liquid Staking 38 · Bridge 28 · Canonical Bridge 15 ·
+nama versioned 11 · nama wrapped/staked 5 · Liquid Restaking 3 ·
+Restaked BTC 2.
 
 **TVL (USD)**
 
@@ -33,582 +55,522 @@ monotonik menurun, 178 nilai berbeda.
 | Seluruh snapshot | $33,4 jt | $703,4 jt | $116,08 miliar | — |
 | Watchlist | $151,3 jt | $513,8 jt | $2,75 miliar (Steakhouse Financial) | $51,3 jt (Firelight) |
 
-**Umur (`as_of` − `listed_at`, hari)**
+**Umur (`as_of` − `listed_at`, hari):** median seluruh snapshot 677 ·
+watchlist 488 · p90 watchlist 710 · maks watchlist 1.563 (Lofty) · min
+watchlist 45 (Nonce Capital).
 
-| | Median | p90 | Maks | Min |
-|---|---|---|---|---|
-| Seluruh snapshot | 677 | 1.469 | 1.851 | 2 |
-| Watchlist | 488 | 710 | 1.563 (Lofty) | 45 (Nonce Capital) |
+**Momentum 7 hari (watchlist):** min −28,5% (b14g) · median −3,3% ·
+maks +11,2% (Galaxy Curation) · positif 12/40 · di bawah −10%: 9/40.
 
-Sebaran umur watchlist: <180 hari: 9 · 180–365 hari: 6 · 1–2 tahun: 19 · 2–3 tahun: 3 · >3 tahun: 1.
-Watchlist condong ke protokol berumur 1–2 tahun — cukup lama untuk mengakumulasi nilai
-tertunda, cukup muda untuk masih pre-token.
+**Kategori — watchlist vs seluruh snapshot:** Risk Curators 12/40 (hanya
+1 peer bertoken) · RWA 7 · Onchain Capital Allocator 3 · Basis Trading 2 ·
+Lending 2 · Chain 2 · Yield 2 · sisanya 1 masing-masing. Dexs (99
+protokol di snapshot) hanya 1 di watchlist: hampir semua DEX besar sudah
+bertoken.
 
-**Momentum 7 hari (watchlist):** min −28,5% (b14g) · median −3,3% · maks +11,2%
-(Galaxy Curation) · positif 12/40 · di bawah −10%: 9/40. Minggu snapshot ini bearish
-untuk watchlist; model harus menghukum penurunan tanpa menghancurkan nilai dasar.
-
-**Kategori — watchlist vs seluruh snapshot**
-
-| Kategori | Watchlist | Seluruh snapshot |
-|---|---|---|
-| Risk Curators | 12 | 1 bertoken saja (lihat §b) |
-| RWA | 7 | 33 |
-| Onchain Capital Allocator | 3 | 29 |
-| Basis Trading | 2 | 21 |
-| Lending | 2 | 75 |
-| Chain | 2 | — (kategori kecil) |
-| Yield | 2 | 39 |
-| Restaking, Dexs, CeDeFi, Insurance, Payments, Governance Incentives, Staking Pool, Stablecoin Wrapper, Collateral Markets | 1 masing-masing | beragam |
-
-Catatan penting: watchlist **didominasi Risk Curators (12/40) dan RWA (7/40)** —
-kategori kurator/vault yang baru muncul. Sebaliknya Dexs (99 protokol di snapshot)
-hanya 1 di watchlist: hampir semua DEX besar sudah bertoken. Ini alasan kategori
-harus masuk model: multiple pasar tiap kategori berbeda jauh.
-
-**Chain — watchlist vs seluruh snapshot**
-
-| Chain | Watchlist | Seluruh snapshot |
-|---|---|---|
-| Ethereum | 26 | 424 |
-| Monad | 15 | 62 |
-| Base | 12 | 176 |
-| Binance | 11 | 178 |
-| Arbitrum | 8 | 188 |
-| Solana | 7 | 152 |
-| Hyperliquid L1 | 7 | 71 |
-| Avalanche | 7 | 125 |
-| Plasma / Flare / Katana / Unichain | 5–6 | kecil |
-
-Monad menonjol: 15 dari 40 watchlist ada di Monad, padahal hanya 62 dari 758
-protokol snapshot — klaster kurator/vault baru di chain baru. Jumlah chain per
-protokol watchlist: 1 chain: 16 · 2: 4 · 3: 7 · 5–9: 5 · 10–15: 7 · 23 (Lagoon): 1.
-Sebaran ini bimodal (single-chain vs multi-chain luas), jadi faktor chain harus
-dibatasi (cap), bukan linear.
-
-**Daftar 40 watchlist (urut TVL menurun)**
-
-| # | Slug | Kategori | TVL | 7d | Umur |
-|---|---|---|---|---|---|
-| 1 | steakhouse-financial | Risk Curators | $2,75 B | −2,19% | 543 h |
-| 2 | gauntlet | Risk Curators | $1,58 B | +5,65% | 543 h |
-| 3 | veda | Onchain Capital Allocator | $1,56 B | −8,29% | 632 h |
-| 4 | usdd | CDP | $1,06 B | −2,81% | 611 h |
-| 5 | nonce-capital | Risk Curators | $513,8 jt | −9,74% | 45 h |
-| 6 | upshift | Onchain Capital Allocator | $499,1 jt | +8,31% | 710 h |
-| 7 | bittensor-dtao | Dexs | $376,0 jt | −6,56% | 56 h |
-| 8 | onre | RWA | $308,9 jt | +0,11% | 488 h |
-| 9 | rockawayx | Risk Curators | $292,5 jt | −2,55% | 233 h |
-| 10 | symbiotic | Collateral Markets | $253,9 jt | −12,03% | 886 h |
-| 11 | opentrade | RWA | $241,5 jt | −1,64% | 708 h |
-| 12 | hyperithm | Risk Curators | $221,6 jt | −4,38% | 543 h |
-| 13 | lightning-network | Payments | $217,9 jt | −10,14% | null |
-| 14 | plume-vaults | RWA | $211,5 jt | −3,08% | 749 h |
-| 15 | k3-capital | Risk Curators | $207,7 jt | −8,90% | 543 h |
-| 16 | hive-protocol | Chain | $198,8 jt | −10,18% | 925 h |
-| 17 | r25 | RWA | $198,2 jt | +0,30% | 199 h |
-| 18 | b14g | Restaking | $173,9 jt | −28,53% | 694 h |
-| 19 | clearstar | Risk Curators | $161,8 jt | −10,09% | 543 h |
-| 20 | saturn | Stablecoin Wrapper | $154,3 jt | −0,75% | 219 h |
-| 21 | lagoon | Onchain Capital Allocator | $151,3 jt | −3,30% | 691 h |
-| 22 | curvance | Lending | $136,3 jt | +0,68% | 352 h |
-| 23 | galaxy-curation | Risk Curators | $130,0 jt | +11,23% | 177 h |
-| 24 | tydro | Lending | $111,3 jt | −4,89% | 394 h |
-| 25 | valos | RWA | $106,3 jt | +0,15% | 113 h |
-| 26 | armitage-by-wintermute | Risk Curators | $103,5 jt | +5,77% | 178 h |
-| 27 | lofty | RWA | $101,1 jt | +0,03% | 1.563 h |
-| 28 | doppler-finance | CeDeFi | $93,3 jt | −14,49% | 638 h |
-| 29 | ember | RWA | $90,0 jt | −5,96% | 423 h |
-| 30 | keyrock | Risk Curators | $83,1 jt | −0,60% | 73 h |
-| 31 | noble | Chain | $83,0 jt | −5,23% | null |
-| 32 | tori-finance | Basis Trading | $77,4 jt | +4,64% | 143 h |
-| 33 | infinifi | Yield | $70,7 jt | −3,28% | 535 h |
-| 34 | axis | Basis Trading | $70,1 jt | +2,33% | 86 h |
-| 35 | reti-pooling | Staking Pool | $65,3 jt | −10,69% | 659 h |
-| 36 | gami-labs | Risk Curators | $63,1 jt | +9,03% | 169 h |
-| 37 | yuzu-money | Yield | $57,3 jt | −9,05% | 365 h |
-| 38 | mezo-earn | Governance Incentives | $53,6 jt | −12,22% | 186 h |
-| 39 | tulipa-capital | Risk Curators | $52,4 jt | −9,35% | 543 h |
-| 40 | firelight | Insurance | $51,3 jt | −14,41% | 340 h |
+**Pre-token di atas floor yang bukan watchlist:** 92 protokol. Yang lolos
+aturan ketat: **20** (lihat §d). Yang gagal: **72** — CEX 27 · Liquid
+Staking 18 · Bridge 15 · Canonical Bridge 8 · nama versioned 2 ·
+Restaked BTC 2.
 
 ---
 
-## (b) Analisis peer mcap/TVL per kategori
+## (b) Peer yang dipakai fit — dan yang sengaja tidak dipakai
 
-Dasar: 128 protokol bertoken dengan `mcap_usd > 0` dan `tvl_usd > 0`. Rasio =
-`mcap_usd / tvl_usd` — berapa pasar menghargai $1 TVL dalam bentuk market cap token.
+Peer fit = protokol bertoken dengan `mcap_usd > 0`, `tvl_usd > 0`,
+`gecko_id` dan `symbol` non-null, **minus kategori Bridge, Canonical
+Bridge, CEX** (23 protokol: Bridge 6 · Canonical Bridge 8 · CEX 9).
+Alasan: token exchange dan token bridge menilai hal yang berbeda dari
+token milik protokol sendiri (mis. Rain, Prediction Market, rasio
+mcap/TVL 400,2; Nexo, CEX, rasio 69,4; mantle-bridge, rasio 14,5), dan
+ketiga kategori itu juga yang dikecualikan house rule dari watchlist —
+jadi comps yang dipakai adalah comps yang sebanding dengan baris board.
+Keputusan ini diuji, bukan diasumsikan: fit pada 128 peer memberi LOO
+miss ×3,40 (OLS, curve-only); fit pada 105 peer memberi ×3,27 (OLS) /
+×3,18 (Huber). Sebaran rasio mcap/TVL pada 105 peer: median 0,205 ·
+p25 0,044 · p75 1,027 — masih sangat miring, itulah mengapa fit dilakukan
+di ruang log, bukan pada rasio mentah.
 
-**Global:** n = 128 · median **0,205** · p25 0,044 · p75 1,043 · p90 2,947 · maks
-400,2 (satu outlier Prediction Market). Sebaran sangat miring ke kanan: median
-0,205 adalah jangkar yang waras, rata-rata tidak dipakai.
-
-**Per kategori (median mentah, n ≥ 2) — dan multiple akhir setelah shrinkage:**
-
-| Kategori | n | Median mentah | p25 | p75 | Multiple dipakai |
-|---|---|---|---|---|---|
-| Lending | 15 | 0,132 | 0,033 | 0,423 | 0,151 |
-| Dexs | 11 | 0,342 | 0,068 | 1,524 | 0,299 |
-| Liquid Staking | 9 | 0,041 | 0,032 | 0,186 | — (kategori dikecualikan dari board) |
-| Yield | 9 | 0,191 | 0,121 | 0,999 | 0,196 |
-| RWA | 9 | 0,275 | 0,140 | 0,414 | 0,250 |
-| CEX | 9 | 0,075 | 0,034 | 0,182 | — (dikecualikan) |
-| Canonical Bridge | 8 | 0,367 | 0,317 | 1,344 | — (dikecualikan) |
-| Basis Trading | 7 | 0,654 | 0,204 | 0,998 | 0,467 |
-| Bridge | 6 | 0,125 | 0,052 | 0,988 | — (dikecualikan) |
-| Cross Chain Bridge | 4 | 0,236 | 0,195 | 2,205 | 0,219 |
-| Yield Aggregator | 4 | 0,050 | 0,031 | 0,252 | 0,136 |
-| Indexes | 3 | 0,148 | 0,051 | 0,148 | 0,183 |
-| CDP | 3 | 0,169 | 0,008 | 0,169 | 0,191 |
-| Privacy | 3 | 0,969 | 0,034 | 0,969 | 0,491 |
-| Restaking | 2 | 0,017 | 0,017 | 0,017 | 0,151 |
-| Onchain Capital Allocator | 2 | 0,006 | 0,006 | 0,006 | 0,148 |
-| Derivatives | 2 | 1,376 | 1,376 | 1,376 | 0,540 |
-| Staking Pool | 2 | 0,001 | 0,001 | 0,001 | 0,147 |
-| Payments | 2 | 0,140 | 0,140 | 0,140 | 0,186 |
-| Risk Curators | 1 | 2,975 | — | — | **0,667** |
-| Chain | 1 | 3,026 | — | — | **0,675** |
-| Collateral Management | 1 | 12,160 | — | — | 1,000 (cap) |
-| Prediction Market | 1 | 400,204 | — | — | 1,000 (cap) |
-| Kategori tanpa peer (CeDeFi, Collateral Markets, Governance Incentives, Insurance, Stablecoin Wrapper, dsb.) | 0 | — | — | — | **0,205** (median global) |
-
-Kategori tanpa peer memakai median global 0,205. Rumus shrinkage
-`(n×median_kategori + 5×0,205)/(n+5)` lalu clamp [0,05; 1,0] — builder memakai
-rumus ini, bukan menyalin angka tabel.
-
-**Tiga pelajaran dari data ini:**
-
-1. **Median mentah per kategori tidak bisa dipakai apa adanya.** Kategori dengan
-   n=1 memberi multiple absurd: Risk Curators 2,975, Chain 3,026, Prediction Market
-   400,2. Tanpa koreksi, seluruh top board akan ditentukan oleh satu sampel.
-   Karena itu multiple akhir memakai **shrinkage** (lihat §c) + clamp [0,05; 1,0].
-   Risk Curators turun dari 2,975 → 0,667 — masih tertinggi kedua, tapi tidak lagi
-   mendominasi segalanya.
-2. **Multiple antar kategori berbeda ~10x bahkan pada n besar:** Lending 0,132
-   vs Dexs 0,342 vs Basis Trading 0,654. Inilah yang membuat model ini bukan
-   sekadar TVL: Veda ($1,56 B TVL, Onchain Capital Allocator, multiple 0,148)
-   bernilai implied lebih rendah daripada Steakhouse ($2,75 B, Risk Curators,
-   0,667) — dan memang begitu seharusnya menurut pasar peer-nya.
-3. **Kategori dengan n kecil tapi konsisten memberi sinyal lemah, bukan nol:**
-   Onchain Capital Allocator n=2 median 0,006 (sangat rendah — pasar menilai
-   allocator hampir tanpa premium token), setelah shrinkage menjadi 0,148, dekat
-   median global. Ini konservatif dan bisa dipertahankan: kita tidak mengklaim
-   pasar menghargai allocator 0,006× TVL berdasarkan 2 sampel.
-
-**Perbandingan dengan starter (`radar-1`):** starter memakai multiple tunggal
-0,25 untuk semua kategori. Akibatnya top-5 starter: Steakhouse $543,6 jt,
-Gauntlet $323,8 jt, Veda $311,3 jt, USDD $214,2 jt, Upshift $111,7 jt — urutan
-hampir murni TVL. Model ini menggeser Veda dari #3 ke #4 dan Upshift dari #5 ke
-#12 (multiple allocator rendah), dan mengangkat Nonce Capital dari #5 TVL ke #3
-implied (Risk Curators + muda + multi-chain moderat). Dari 40 baris watchlist,
-**36 mengubah posisi relatif terhadap urutan TVL murni** — model ini benar-benar
-me-ranking, bukan mengurutkan ulang TVL.
+**Sensitivitas peer set (LOO, curve-only):** 128 peer OLS ×3,40 · 105
+peer OLS ×3,27 · 105 peer Huber ×3,18 · 94 peer (minus LST juga) OLS
+×3,65 · 90 peer (hanya kategori yang muncul di board) OLS ×3,62.
+Mengeluarkan LST memperburuk hasil, jadi LST tetap di dalam fit;
+mengeluarkan Bridge/CEX memperbaiki, jadi keduanya keluar. Kategori
+board yang tidak punya peer sama sekali (18 baris: CDP Manager, OTC
+Marketplace, Farm, Insurance, Governance Incentives, Stablecoin
+Wrapper, CeDeFi, Collateral Markets, dsb.) mendapat offset 0 — kurva
+murni, tanpa klaim kategori.
 
 ---
 
-## (c) Formula model `radar-2`
+## (c) Formula model `radar-3`
 
 ### Formula
 
 ```
-implied_value_usd = max(1, round(
-    tvl_usd
-  × multiple_kategori            // (d) nilai wajar peer, shrinkage + clamp
-  × growth_multiplier            // (b) momentum 7 hari
-  × maturity_multiplier          // (c) umur tanpa token
-  × chain_multiplier             // (e) jangkauan multi-chain
-))
+log10(implied) = a + b · log10(tvl_usd / $100M)
+               + offset_kategori            // median residual kategori, shrink k=12
+               + 0,1 · clamp(change_7d, -60, 120) / 100
+implied_value_usd = max(1, round(10 ^ log10(implied)))
 ```
+
+Konstanta fitted (dihitung `lib/model.ts` dari snapshot, bukan
+hardcode): **a = 7,1225 · b = 0,4470**. Artinya: pada TVL $100 jt,
+kurva memberi **$13,26 juta**; TVL 10× ⇒ nilai hanya **×2,80**
+(bukan ×10 — inilah size slope yang diperbaiki dari `radar-2`).
 
 ### Komponen
 
-**(d) Multiple kategori — bobot terbesar, jangkar nilai.**
+**(1) Kurva ukuran — bobot terbesar.** `log10(mcap) = a + b·log10(TVL)`
+difit pada 105 peer (§b). Metode fit dipilih lewat blind test, bukan
+preferensi — lihat tabel metode di §(f): OLS ×3,27 / Huber ×3,18 /
+Theil–Sen ×3,19 (LOO, curve-only, 105 peer). Huber menang di LOO
+maupun walk-forward (×2,38 vs OLS ×2,53, Theil–Sen ×2,52), jadi Huber
+yang dipakai (IRLS, delta 1,345, 60 iterasi tetap). Theil–Sen hampir
+setara tapi lebih lambat dan tidak lebih baik di satu pun metrik.
 
-```
-peer_ratio(p) = mcap_usd / tvl_usd   untuk p bertoken, mcap>0, tvl>0
-median_kategori(c) = median(peer_ratio atas protokol bertoken berkategori c)
-median_global      = median(peer_ratio atas semua peer) = 0,205
-multiple(c) = clamp( (n_c × median_kategori(c) + 5 × median_global) / (n_c + 5),
-                     0,05, 1,0 )
-            = median_global bila kategori tanpa peer (n_c = 0)
-```
+**(2) Offset kategori — median residual yang di-shrink.**
+`offset(c) = (n_c × median_residual_c) / (n_c + 12)` dalam log10, dengan
+12 pseudo-comps yang menarik offset ke 0. Offset dihitung dari residual
+peer terhadap kurva, bukan dari rasio mcap/TVL mentah. Rentang offset:
+Prediction Market +0,2175 (×1,65; n=1 peer — hampir seluruhnya
+di-shrink) · Privacy +0,1763 · Collateral Management +0,1134 ·
+Cross Chain Bridge +0,1122 · Basis Trading +0,0930 · RWA +0,0788 ·
+Risk Curators +0,0644 · Dexs +0,0511 · … · Lending −0,0827 ·
+Yield Aggregator −0,0796 · Liquid Staking −0,1457 · Staking Pool
+−0,1637. Tabel lengkap (31 kategori) ada di `data.js` → `fit.offsets`.
+Kategori tanpa peer: offset 0.
 
-- Alasan: pasar sudah memberi harga pada token sejenis; median per kategori
-  adalah estimasi "bila protokol ini meluncurkan token, berapa market cap yang
-  wajar per $1 TVL". Median (bukan rata-rata) karena sebaran miring (p90 2,947).
-- Shrinkage k=5: kategori n=1 hampir sepenuhnya ditarik ke median global
-  (contoh: Risk Curators (1×2,975 + 5×0,205)/6 = 0,667); kategori n=15 hampir
-  murni median kategorinya (Lending → 0,151). Tanpa shrinkage, satu outlier
-  menentukan board. Dengan k=5, tidak ada kategori yang multiple-nya ditentukan
-  satu protokol.
-- Clamp [0,05; 1,0]: mencegah implied melebihi TVL (token jarang bernilai
-  > TVL-nya secara median; p75 global 1,043 menunjukkan 1,0 adalah batas atas
-  yang konservatif) dan mencegah multiple ~0 menghapus protokol (Staking Pool
-  mentah 0,001 → 0,147 setelah shrinkage, jadi clamp bawah jarang terpicu).
+Mengapa offset dipertahankan padahal LOO median miss-nya sedikit
+memburuk (curve-only ×3,18 → +kategori ×3,37)? Dengan mata terbuka:
+(i) walk-forward tidak berubah (×2,38 → ×2,40 — dalam noise);
+(ii) within-3× dan ρ juga tidak bergerak jelas (44,76–47,62%,
+ρ 0,33–0,34 — tidak ada keuntungan atau kerugian yang tegas di
+sana); (iii) tanpa offset, kategori dengan ekonomi token yang
+jelas berbeda (Risk Curators vs Onchain Capital Allocator, selisih
+offset 0,14 dex ≈ ×1,38) diperlakukan sama, dan itu bertentangan
+dengan bukti peer-nya sendiri. Keputusan ini diambil atas dasar
+campuran bukti — LOO sedikit negatif, WF netral, dan pembedaan
+kategori yang nyata di data. Catatan jujur: pada 128 peer, offset
+jelas membantu (within-3× 42% → 47%, ρ 0,40 → 0,43, miss tetap
+×3,40); pada 105 peer yang dipakai, bantuannya menyusut sampai
+hampir nol. Lihat tabel ablasi §(f) — tidak ada yang disembunyikan.
 
-**(a) TVL — skala dasar.** Langsung `tvl_usd`, tanpa transformasi log. Alasan:
-TVL adalah ukuran adopsi yang paling sebanding antar protokol; log akan
-mengecilkan perbedaan skala yang memang nyata ($2,75 B vs $5 jt adalah 550×,
-dan implied harus mencerminkannya). Perbedaan antar protokol justru dibuat
-oleh multiple dan pengali lain, bukan dengan meratakan TVL.
+**(3) Growth 7 hari — kecil, dipertahankan tipis.** Suku
+`+0,1 × clamp(change_7d, −60, 120)/100` dalam log10: efek maksimal
+×1,15 (pada +120%) / ×0,87 (pada −60%); pada ±10% hanya ±2,3%.
+Ablasi: +growth memperbaiki LOO (×3,37 → ×3,28; within-3× 44,76% →
+46,67%) dengan WF hampir tidak berubah (×2,40 → ×2,40). Dipertahankan
+karena LOO — sampel blind yang lebih besar (n=105) — membaik dan WF
+tidak menolaknya; efeknya dibatasi sehingga satu minggu berisik tidak
+pernah membajak ranking.
 
-**(b) Momentum — `growth_multiplier = 1 + 0,4 × clamp(change_7d, −60, +120) / 100`**
+### Yang TIDAK dipakai (dan hasil ablasi yang membuangnya)
 
-- `change_7d` null → 0 (netral, bukan hukuman; hanya 4 protokol snapshot yang
-  null, 0 di watchlist).
-- Clamp −60%/+120%: 7 hari adalah jendela berisik; tanpa clamp, satu minggu
-  +300% akan mendominasi board. Rentang pengali yang dihasilkan: **0,76–1,48**.
-- Bobot 0,4 (bukan 1,0 seperti starter yang memakai 0,5): momentum adalah
-  sinyal, bukan nilai — protokol yang turun 10% dalam seminggu tidak kehilangan
-  10% nilai fundamentalnya. Pada snapshot ini (median watchlist −3,3%), efek
-  tipikal hanya ±2–4%.
-- Negatif ditangani simetris: b14g (−28,53%) mendapat 0,886; Galaxy Curation
-  (+11,23%) mendapat 1,045.
+| Suku | Bentuk yang diuji | LOO | WF rata-rata | Keputusan |
+|---|---|---|---|---|
+| Tenure / seasoning | +0,1 × (log10(age) − log10(548)), age null → 548 | ×3,38 (vs ×3,37 tanpa) | ×2,47 (vs ×2,40) | **Dibuang.** Tidak membantu di satu pun metrik. Umur tetap ditampilkan sebagai kolom (age_days, launch odds) — hanya bukan pengali nilai. |
+| Chain breadth | +0,02 × min(chains−1, 4) | ×3,61 | ×2,39 | **Dibuang.** LOO memburuk jelas; WF netral. Jumlah chain tetap ditampilkan di baris. |
+| Growth+tenure+breadth sekaligus | ketiganya | ×3,83 | ×2,41 | **Dibuang.** Lebih buruk dari tiap suku sendiri. |
+| Launch-odds multiplier | implied × odds(bucket umur) | ×3,82 | ×4,13 | **Dibuang — katastrofal.** Odds adalah peluang launch, bukan penentu harga bila launch terjadi; mengalikannya membuat model meramal harga token yang sudah launch dengan odds <1, dan blind test menghukumnya keras. Odds tetap ditampilkan per baris sebagai konteks, tidak dikalikan. |
+| Sibling / parent haircut | — | — | — | **Tidak diterapkan karena tidak dapat diverifikasi.** Snapshot tidak punya field `parentProtocol`; tidak ada slug parent ("sentora", "polymarket", "extended", "defi-saver", "bitfi") di dalam snapshot. Lihat §(g). |
 
-**(c) Maturitas — `maturity_multiplier = 0,8 + 0,2 × min(age_days, 1095) / 1095`**
+**Launch odds per bucket umur** (share protokol di bucket yang
+mencatat token — gecko_id atau symbol non-null — dari 758 protokol;
+BUKAN pengali nilai): 0–180 hari 0,264 (23/87) · 180–365 hari 0,397
+(29/73) · 365–730 hari 0,383 (70/183) · 730–1095 hari 0,547 (76/139) ·
+1095–1460 hari 0,787 (70/89) · >1460 hari 0,797 (59/74) · umur null
+0,788 (89/113). Definisi ini mengikuti house rule (pre-token =
+ketiganya null); bila memakai definisi mcap>0, angkanya jauh lebih
+kecil — jangan campur definisi saat membandingkan dengan entry lain.
 
-- `age_days = as_of − listed_at` (hari, floor 0); `listed_at` null → 548 hari
-  (median umur seluruh snapshot 677 h; dipakai 548 sebagai fallback netral —
-  di tengah rentang, bukan 365 hari starter yang terlalu muda).
-- Rentang **0,80–1,00**: protokol 45 hari (Nonce Capital) mendapat 0,808;
-  protokol ≥3 tahun mendapat 1,00. Alasan: protokol yang bertahan 1–3 tahun
-  tanpa token mengakumulasi nilai tertunda (pengguna, integrasi, reputasi)
-  yang belum termonetisasi token — tapi efeknya dibatasi 20% karena umur saja
-  bukan nilai; starter memakai rentang 0,6–1,0 (40%), terlalu besar sehingga
-  umur bisa mengalahkan TVL.
-- Cap 1095 hari (3 tahun): setelah 3 tahun, umur tambahan tidak menambah
-  "nilai tertunda" — Lofty (1.563 hari) dan Hive (925 hari) dibedakan hanya
-  sampai batas ini.
-
-**(e) Jangkauan chain — `chain_multiplier = 1 + 0,05 × min(max(chains−1, 0), 4)`**
-
-- Rentang **1,00–1,20**: single-chain 1,00; ≥5 chain 1,20. Alasan: multi-chain
-  berarti distribusi dan permukaan pengguna lebih luas, tapi TVL sudah
-  menghitung semua chain — menggandakan hitungan akan double-count. Cap 4
-  (bukan linear sampai 23 chain seperti Lagoon) karena sebaran chain bimodal
-  dan chain ke-10+ menambah sedikit.
-- Contoh: Steakhouse (11 chain) 1,20; Gauntlet (14) 1,20; Veda (13) 1,20;
-  Bittensor dTAO (1 chain) 1,00.
-
-### Mengapa bobot ini (ringkasan sensitivitas)
-
-| Komponen | Rentang pengali | Peran |
-|---|---|---|
-| Multiple kategori | 0,136–0,675 (≈5×) | Penentu utama — membedakan kategori |
-| TVL | 5 jt–2,75 B (≈550×) | Skala — membedakan ukuran |
-| Momentum | 0,76–1,48 (≈2×) | Koreksi jangka pendek |
-| Maturitas | 0,80–1,00 (1,25×) | Koreksi umur, dibatasi |
-| Chain | 1,00–1,20 (1,2×) | Koreksi jangkauan, dibatasi |
-
-Urutan pengaruh yang disengaja: **kategori ≈ skala > momentum > maturitas ≈ chain**.
-Tiga pengali terakhir bersama-sama maksimal mengubah nilai ±~50%, tidak pernah
-membalikkan perbedaan TVL 10×. Ini yang membuat ranking stabil dan bisa
-dipertahankan di depan juri: tidak ada satu komponen kecil yang membajak board.
-
-### Pseudocode (untuk builder — implementasi persis)
+### Pseudocode (untuk builder — implementasi persis, `lib/model.ts`)
 
 ```ts
-// Input: snapshot { as_of, floor_usd, protocols[], watchlist[] }
-// Output: board rows terurut, rank 1..N, implied strictly non-increasing.
-
-const DAY_MS = 86_400_000;
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-
-// 1. Peer ratios dari protokol BERT token di snapshot yang sama.
-const peers = protocols.filter(p =>
-  p.mcap_usd !== null && p.gecko_id !== null && p.symbol !== null &&
-  p.mcap_usd > 0 && p.tvl_usd > 0);
-const ratio = p => p.mcap_usd / p.tvl_usd;
-const median = xs => { const s = [...xs].sort((a, b) => a - b);
-  return s[Math.floor((s.length - 1) / 2)]; };
-const globalMedian = median(peers.map(ratio));            // 0,205
-const byCategory = groupBy(peers, p => p.category ?? "(null)");
-
-// 2. Multiple per kategori (shrinkage k=5, clamp [0.05, 1.0]).
-function multiple(category) {
-  const rs = byCategory.get(category ?? "(null)");
-  if (!rs) return globalMedian;
-  return clamp((rs.length * median(rs) + 5 * globalMedian) / (rs.length + 5), 0.05, 1.0);
-}
-
-// 3. Umur.
-function ageDays(p) {
-  if (p.listed_at === null) return null;
-  return Math.max(0, Math.floor(
-    (Date.parse(as_of + "T00:00:00Z") - Date.parse(p.listed_at + "T00:00:00Z")) / DAY_MS));
-}
-
-// 4. Skor satu protokol.
-function impliedValue(p) {
-  const g = p.change_7d === null ? 0 : clamp(p.change_7d, -60, 120);
-  const growthMult = 1 + 0.4 * g / 100;
-  const age = ageDays(p);
-  const ageForModel = age === null ? 548 : age;
-  const maturityMult = 0.8 + 0.2 * Math.min(ageForModel, 1095) / 1095;
-  const chainMult = 1 + 0.05 * Math.min(Math.max(p.chains.length - 1, 0), 4);
-  const implied = Math.max(1, Math.round(
-    p.tvl_usd * multiple(p.category) * growthMult * maturityMult * chainMult));
-  return { implied, growthMult, maturityMult, chainMult, age,
-           multiple: multiple(p.category) };
-}
-
-// 5. Pemilihan baris (lihat §d), lalu urutkan:
-//    sort by implied DESC, tie-break slug ASC (deterministik).
-//    rank = posisi + 1. Jaminan: implied[i] <= implied[i-1] karena pengurutan;
-//    nilai dibulatkan ke integer — bila dua implied sama persis setelah
-//    pembulatan, tie-break slug menjaga urutan deterministik dan gate
-//    "tidak naik seiring rank" tetap lolos (sama, bukan naik).
+// peers: mcap>0, tvl>0, gecko+symbol non-null, kategori bukan
+//   Bridge/Canonical Bridge/CEX  (n=105)
+// curve: Huber IRLS (delta 1.345, 60 iterasi) atas
+//   (log10(tvl/1e8), log10(mcap))  ->  a=7.1225, b=0.4470
+// offsets: per kategori, (n*median(residual))/(n+12); tanpa peer -> 0
+// implied(p) = 10^(a + b*log10(tvl/1e8) + offset(cat)
+//                + 0.1*clamp(change_7d ?? 0, -60, 120)/100)
+// band: implied * 10^q, q = kuantil residual LOO
+//   (p10 -1.0727, p25 -0.4940, p75 0.5287, p90 0.9619)
+// rank range: min/max rank atas 200 bootstrap refits (PRNG mulberry32,
+//   seed 20261117, resample peer dengan replacement, refit Huber+offset)
 ```
 
-**Determinisme:** semua input dari snapshot; tidak ada `Date.now()`, random, atau
-data luar. Dua run pada snapshot yang sama menghasilkan board yang identik byte
-demi byte (kecuali tie-break slug yang memang deterministik). Tidak ada nama
-protokol yang di-hardcode: multiple dihitung dari kategori, bukan dari slug.
-
-**Yang TIDAK dipakai (dan alasannya):** `mcap_usd` protokol itu sendiri (board
-hanya pre-token — semuanya null); `gecko_id`/`symbol` (hanya dipakai untuk
-menentukan pre-token vs bertoken); `name` kecuali untuk aturan eksklusi
-watchlist; data harga/Yield/APR/points (tidak ada di snapshot — mengarangnya
-akan melanggar "model mengikuti angka snapshot").
+**Determinisme:** semua input dari snapshot; PRNG ber-seed; jumlah
+iterasi fit tetap; tidak ada `Date.now()`, `Math.random`, atau data
+luar. Dua run `main.ts` pada snapshot yang sama byte-identik
+(terverifikasi `diff -r`, lihat §(h)). Tidak ada nama protokol yang
+di-hardcode: kurva, offset, dan odds dihitung dari snapshot.
 
 ---
 
 ## (d) Aturan inklusi & ukuran board N
 
-### Rekomendasi: **N = 178**
+### Rekomendasi: **N = 198**
 
 - **40 watchlist** (wajib — coverage 1,0 adalah gerbang pertama juri).
-- **+ 138 pre-token di bawah floor** yang lolos **aturan watchlist yang sama**,
-  diurutkan menurut skor model (bukan TVL).
-- Total maksimum yang mungkin di bawah aturan ini adalah 178 — tidak ada baris
-  ke-179 yang memenuhi syarat, jadi N bukan angka yang dipilih sembarangan:
-  **board mencakup seluruh alam pre-token yang memenuhi definisi watchlist
-  pada TVL ≥ $5 jt**.
+- **+ 20 pre-token di atas floor** yang lolos aturan watchlist yang
+  sama — tier "above-floor". Mereka bukan watchlist karena DefiLlama
+  mencatat `parentProtocol` untuk mereka, dan field itu TIDAK ada di
+  snapshot; tidak ada slug parent mereka di dalam snapshot. Rules
+  bounty menyatakan watchlist adalah floor, bukan ceiling ("a board
+  may rank protocols the watchlist does not name").
+- **+ 138 pre-token di bawah floor** yang lolos aturan yang sama —
+  tier "early".
+- Total maksimum yang mungkin di bawah aturan ini adalah 198 — tidak
+  ada baris ke-199 yang memenuhi syarat, jadi N bukan angka yang
+  dipilih sembarangan.
 
-### Aturan inklusi baris di bawah floor (aturan watchlist, floor dihapus)
+### Aturan inklusi (aturan watchlist, floor dihapus, ceiling dihapus)
 
-Suatu protokol di bawah floor masuk board bila dan hanya bila:
+Suatu protokol masuk board bila dan hanya bila:
 
 1. Pre-token: `mcap_usd`, `gecko_id`, `symbol` ketiganya null;
-2. `tvl_usd >= $5.000.000` (sudah dijamin snapshot) — **tanpa floor TVL minimum
-   tambahan**; baris terbawah adalah Nucleus ($5,0 jt TVL, implied $657.684);
-3. Bukan produk wrapped/staked/bridged: kategori **bukan** Bridge, Canonical
-   Bridge, Liquid Staking, Liquid Restaking, Restaked BTC, CEX; nama tidak
-   mengandung kata utuh `wrapped`/`staked`/`staking` (case-insensitive) dan
-   tidak diawali nama exchange (Binance, Coinbase, Bybit, Kraken, Bitget, OKX,
-   Bitfinex, Gemini);
-4. Nama tidak berakhiran penanda versi (`\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$`).
+2. `tvl_usd >= $5.000.000` (sudah dijamin snapshot);
+3. Bukan produk wrapped/staked/bridged: kategori **bukan** Bridge,
+   Canonical Bridge, Liquid Staking, Liquid Restaking, Restaked BTC,
+   CEX; nama tidak mengandung kata utuh `wrapped`/`staked`/`staking`
+   (case-insensitive) dan tidak diawali nama exchange (Binance,
+   Coinbase, Bybit, Kraken, Bitget, OKX, Bitfinex, Gemini);
+4. Nama tidak berakhiran penanda versi
+   (`\s(V\d+(\.\d+)?|v\d+(\.\d+)?|\d+\.\d+)$`).
 
-Aturan ini **persis definisi watchlist di `input/README.md`, minus floor** —
-jadi board adalah "watchlist tanpa floor", sebuah cerita yang satu kalimat dan
-bisa dipertahankan di depan juri. Ke-40 watchlist lolos aturan ini (verifikasi:
-0 gagal).
+Ke-40 watchlist lolos aturan ini (verifikasi: 0 gagal).
 
-### Mengapa bukan N = 200 (starter) atau N = 226 (longgar)
+### 20 baris above-floor (urut rank board)
 
-| Opsi | Isi | Masalah |
-|---|---|---|
-| N = 200 (starter) | 40 + 160 di bawah floor **menurut TVL** | (i) Cutoff 160 arbitrer — tidak ada alasan 160 bukan 150/170. (ii) Pilihan menurut TVL, bukan skor model: baris ke-160 dipilih karena besar, bukan karena bernilai. (iii) Di bawah floor ada 186 kandidat longgar — 200 berarti membuang 26 tanpa alasan. |
-| N = 226 (longgar) | 40 + 186 pre-token di bawah floor, filter starter (hanya CEX + versioned) | Memasukkan **48 produk yang definisi watchlist sendiri menolak**: 20 Liquid Staking, 13 Bridge, 7 Canonical Bridge, 3 Liquid Restaking, 3 Staking Pool, 1 Chain bernama staking, 1 Farm staking. Produk-produk ini — mis. `bitget-sol`, `marginfi-lst`, `morph-bridge` — adalah representasi token yang **sudah diperdagangkan** (SOL, dsb.), bukan protokol yang menunggu token sendiri. Memasukkannya merusak klaim "pre-token" di depan juri kriteria 2. |
-| **N = 178 (direkomendasikan)** | 40 + 138, filter ketat = definisi watchlist | Tidak ada cutoff arbitrer (semua yang memenuhi syarat masuk); tidak ada produk wrapped/staked/bridged; board sepenuhnya pre-token. Kekurangan: lebih sedikit baris dari starter — tapi 178 masih jauh di atas minimum gate (100) dan setiap baris bisa dipertahankan. |
+| Rank | Slug | Kategori | TVL |
+|---|---|---|---|
+| 1 | sentora-curator | Risk Curators | $2,76 B |
+| 6 | polymarket-international | Prediction Market | $320 jt |
+| 13 | bitfi-basis | Basis Trading | $215 jt |
+| 19 | defi-saver-asset-management | CDP Manager | $276 jt |
+| 22 | theo-network-thusd | RWA | $139 jt |
+| 24 | cian-yield-layer | Yield Aggregator | $280 jt |
+| 29 | mellow-core | Onchain Capital Allocator | $233 jt |
+| 31 | extended-perps | Derivatives | $96 jt |
+| 33 | figure-markets-prime | Lending | $191 jt |
+| 34 | figure-markets-exchange | OTC Marketplace | $131 jt |
+| 40 | circle-gateway | Cross Chain Bridge | $65 jt |
+| 44 | arcus-perps | Derivatives | $60 jt |
+| 46 | stellar-defi-hub | Farm | $83 jt |
+| 48 | azverse-perps | Derivatives | $52 jt |
+| 51 | nado-spot | Dexs | $51 jt |
+| 54 | avant-avusd | Onchain Capital Allocator | $95 jt |
+| 56 | usdcx | Stablecoin Wrapper | $57 jt |
+| 66 | ipor-fusion | Onchain Capital Allocator | $68 jt |
+| 67 | loopscale-lending | Lending | $71 jt |
+| 74 | solv-strategies | Onchain Capital Allocator | $57 jt |
 
-Di bawah filter ketat, 5 besar pre-token di bawah floor menurut model: re7-labs
-$31,8 jt · ultrayield-curator $26,9 jt · y10k-capital $16,9 jt · august-digital
-$16,7 jt · apex-omni $16,6 jt. TVL mereka $5–49,6 jt — inilah "early radar"
-yang diminta bounty: protokol kecil yang model nilai tinggi karena kategori +
-momentum + umur, bukan karena TVL-nya paling besar (top-10 di bawah floor
-menurut TVL vs menurut model hanya cocok sebagian; contoh: `current` $49,6 jt
-TVL tidak masuk top-10 model).
+Catatan: `circle-gateway` (Cross Chain Bridge) dan `usdcx` (Stablecoin
+Wrapper) lolos karena house rule hanya mengecualikan Bridge /
+Canonical Bridge / Liquid Staking / Liquid Restaking / Restaked BTC /
+CEX — Cross Chain Bridge dan Stablecoin Wrapper tidak ada di daftar
+itu. Itu keputusan rule, bukan pengecualian buatan model.
 
 ### Protokol bertoken: masuk board atau tidak?
 
-**Rekomendasi: TIDAK masuk board ranking. Masuk dashboard sebagai view terpisah
-("Live token" / pembanding), dengan nilai pasarnya sendiri (`mcap_usd`), bukan
-implied value.**
-
-Alasan, merujuk kriteria juri 2 ("board memisahkan protokol yang tokennya sudah
-diperdagangkan dari yang belum"):
-
-- Kriteria 2 menghargai pemisahan yang **jelas**. Mencampur bertoken ke dalam
-  ranking yang sama — walau dengan label — mengaburkan jawaban atas pertanyaan
-  bounty ("protokol pre-token mana yang layak di-farming?") dan memaksa juri
-  menilai apakah labelnya cukup jelas. View terpisah adalah pemisahan yang
-  tidak bisa disalahpahami.
-- Implied value adalah klaim "berapa nilai token bila diluncurkan"; untuk
-  protokol bertoken, nilai itu sudah ada (market cap) — menaruh keduanya dalam
-  satu kolom angka mengundang perbandingan yang salah (market cap vs model).
-- View terpisah justru **memperkuat** model: ia adalah tempat peer multiple
-  (§b) ditampilkan sebagai bukti — "inilah 24 token yang sudah diperdagangkan,
-  dan dari merekalah multiple kategori dihitung". Starter sudah melakukan ini
-  (`LIVE_ROWS = 24`, urut market cap); pertahankan, dan tampilkan multiple
-  kategori di view itu agar juri melihat asal angka model.
-- Dampak ke kriteria 1 (liputan watchlist): tidak ada — coverage dihitung dari
-  board, dan board 178 baris mencakup 40/40 watchlist (coverage 1,0).
-- Dampak ke kriteria 4 (dashboard sortable/filterable): view Live menambah satu
-  filter/tab tanpa mengorbankan board utama.
-
-Implementasi: `liveRows` = protokol bertoken (bukan CEX), urut `mcap_usd`
-menurun, tampilkan `mcap_usd` + `tvl_usd` + rasio `mcap/TVL` per baris. Jumlah
-24 seperti starter sudah cukup sebagai pembanding (bukan ranking kedua).
+**TIDAK masuk board ranking. Masuk dashboard sebagai view terpisah
+("Live token"), dengan nilai pasarnya sendiri (`mcap_usd`), bukan
+implied value — 24 baris teratas menurut market cap.** Alasan sama
+dengan MODEL v2 §d: kriteria 2 menghargai pemisahan yang jelas, dan
+view terpisah adalah tempat peer fit (§b) ditampilkan sebagai bukti.
 
 ---
 
-## (e) Template farm_steps per kategori + 3 contoh lengkap
+## (e) Ekonomi farm per baris
 
-### Prinsip template
+### Asumsi (dinyatakan; bukan fakta snapshot)
 
-- **6 langkah** per protokol (dalam rentang gate 3–12). Struktur tetap:
-  1) dompet baru, 2) aksi utama kategori, 3) aksi kualifikasi mingguan,
-  4) masa hold, 5) cek halaman insentif resmi, 6) log + rencana keluar.
-- **Setiap langkah satu string 20–600 karakter** dengan format
-  `<aksi>. Cost: <biaya>. Time: <waktu>.` — biaya dan waktu selalu eksplisit
-  (kriteria juri 3: "farm plan konkret dengan biaya dan waktu").
-- **Modal menurut TVL:** ≥$1 B → $250 · ≥$100 jt → $150 · ≥$50 jt → $100 ·
-  di bawah itu → $50. Modal kecil dan seragam agar rencana realistis untuk
-  semua ukuran protokol.
-- **Masa hold menurut umur:** umur <180 hari → 60 hari · <365 hari → 45 hari ·
-  ≥365 hari → 30 hari · null → 45 hari. Protokol muda butuh jendela kualifikasi
-  lebih panjang.
-- **Gas menurut chain utama:** Ethereum ~$2–8 · L2/Base/Arbitrum/Monad/Flare
-  ~$1–2 · Solana ~$0,10. Angka ini perkiraan wajar per chain, bukan janji.
-- **Tidak mengarang program insentif.** Snapshot tidak berisi data points /
-  airdrop / program insentif apa pun. Maka langkah 5 selalu berbunyi "cek
-  halaman resmi protokol untuk program insentif" — tidak pernah mengklaim ada
-  points program bila tidak ada datanya. Bila protokol memang punya program
-  (diketahui dari halaman resminya saat builder memverifikasi), barulah langkah
-  itu boleh menyebut nama programnya.
-- Slot yang diisi dari snapshot: `{name}`, `{chain}` (chain pertama),
-  `{capital}`, `{hold}`, `{gas}`. Tidak ada nama protokol yang di-hardcode
-  di template.
-
-### Aksi utama per kategori
-
-| Kategori (cocok substring, lowercase) | Aksi utama |
+| Asumsi | Nilai |
 |---|---|
-| Risk Curators, Onchain Capital Allocator, Yield, Yield Aggregator, Leveraged Farming | Deposit `{capital}` ke vault `{name}` di `{chain}` |
-| Lending, CDP, Collateral Markets | Supply `{capital}` USDC sebagai collateral / supply ke `{name}` di `{chain}` |
-| Dexs, Liquidity Manager | Sediakan `{capital}` likuiditas di pool utama `{name}` di `{chain}` |
-| RWA | Beli/mint `{capital}` aset yield-bearing `{name}` di `{chain}` dan hold |
-| Basis Trading | Deposit `{capital}` ke vault basis-trading `{name}` di `{chain}` |
-| Perpetuals / Derivatives | Deposit `{capital}` USDC sebagai margin di `{name}`, buka satu hedge kecil |
-| Restaking | Restake `{capital}` aset staking chain melalui `{name}` |
-| Staking Pool | Stake `{capital}` melalui `{name}` dan simpan receipt |
-| Insurance | Beli `{capital}` cover dari `{name}` di `{chain}` |
-| Payments | Gunakan `{name}` untuk pembayaran / simpan `{capital}` saldo di `{chain}` |
-| Chain | Bridge `{capital}` ke `{chain}` dan gunakan aplikasi native-nya |
-| Governance Incentives | Deposit `{capital}` ke `{name}` dan ikuti voting governance |
-| CeDeFi | Deposit `{capital}` ke vault CeDeFi `{name}` di `{chain}` |
-| Stablecoin Wrapper, Stablecoins | Mint/deposit `{capital}` aset stabil melalui `{name}` di `{chain}` |
-| Bridge / Canonical Bridge (tidak ada di board — hanya untuk kelengkapan) | Bridge `{capital}` USDC ke `{chain}` melalui `{name}` |
-| Default (kategori null / lain) | Deposit `{capital}` USDC ke `{name}` di `{chain}` |
+| Deposit default (switcher $500 / $1K / $5K / $10K) | **$1.000** |
+| Airdrop share dari implied value bila launch | **10%** |
+| Time share | **90 / (age_days + 90)**; age null → 548 hari |
+| Hold | **90 hari** (day 0 → day 90) |
+| Transaksi on-chain | **15** (1 setup + 1 deposit + 12 mingguan + 1 exit) |
+| Gas per transaksi | Ethereum **$5,00** · L2 (Base, Arbitrum, Optimism, Monad, Polygon, Ink, Unichain, Katana, Linea, Scroll, Blast) **$0,50** · Solana **$0,10** · chain lain **$1,00** |
+| Forgone yield | T-bill **4,5%** per tahun atas deposit selama 90 hari (posisi farming diasumsikan menghasilkan 0% — konservatif; snapshot tidak berisi data yield) |
+| Waktu kerja | **3,17 jam** (5 + 15 + 120 + 10 + 15 + 10 + 5 + 10 menit) |
+| Verdict | **FARM** bila break-even ≤ 10% · **THIN** bila ≤ 33% · **SKIP** bila di atasnya |
 
-Langkah 3 (mingguan) menyesuaikan kategori: deposit / borrow / swap / vote /
-rebalance / renew cover — selalu satu aksi kecil per minggu, bukan daftar
-tugas yang mustahil.
+### Formula
 
-### Contoh 1 — besar: Steakhouse Financial (rank 1, Risk Curators, TVL $2,75 B, Base, implied $1,96 B)
+```
+slice_usd      = 10% × implied × deposit/TVL × time_share
+fees_usd       = 15 × gas_per_tx
+forgone_usd    = deposit × 4,5% × 90/365
+total_cost_usd = fees_usd + forgone_usd
+net_usd        = slice_usd − total_cost_usd        (bila token launch)
+breakeven_odds = total_cost_usd / slice_usd        (peluang launch yg dibutuhkan agar EV ≥ 0)
+net_per_hour   = net_usd / 3,17 jam
+```
 
-1. `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. Cost: under $3 of gas for the first transaction. Time: 5 minutes.` (162 karakter)
-2. `Deposit $250 of USDC into a Steakhouse Financial vault on Base and keep the position open. Cost: $250 of capital and about $2 of gas. Time: 15 minutes to set up.` (161 karakter)
-3. `Repeat one qualifying action each week, such as a deposit, a rebalance or a vote on a Steakhouse Financial vault. Cost: about $2 of gas a week. Time: 10 minutes a week.` (168 karakter)
-4. `Hold the vault position for at least 30 days so the activity is counted in more than one snapshot. Cost: the $250 stays in the position. Time: 30 days.` (151 karakter)
-5. `Before you withdraw, open Steakhouse Financial's own points or rewards page and claim only from the link it publishes. Cost: no fee to check, and never pay to claim. Time: 10 minutes.` (183 karakter)
-6. `Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it. Cost: nothing but the log. Time: 5 minutes.` (152 karakter)
+Slice naik sebanding deposit; forgone juga; gas tetap — jadi tiket
+besar membersihkan biaya lebih mudah. Semua ukuran dihitung per baris
+(`farm.sizes`).
 
-### Contoh 2 — menengah: OnRe (rank 14, RWA, TVL $308,9 jt, Solana, implied $68,6 jt)
+### Hasil — dibaca apa adanya
 
-1. `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. Cost: under $1 of gas for the first transaction. Time: 5 minutes.` (162 karakter)
-2. `Buy $150 of OnRe's yield-bearing asset on Solana and hold it in the wallet. Cost: $150 of capital and about $0.10 of gas. Time: 15 minutes to set up.` (149 karakter)
-3. `Repeat one qualifying action each week, such as adding to the position or using the asset in an OnRe flow on Solana. Cost: about $0.10 of gas a week. Time: 10 minutes a week.` (174 karakter)
-4. `Hold the position for at least 30 days so the activity is counted in more than one snapshot. Cost: the $150 stays in the position. Time: 30 days.` (145 karakter)
-5. `Before you sell, open OnRe's own points or rewards page and claim only from the link it publishes. Cost: no fee to check, and never pay to claim. Time: 10 minutes.` (163 karakter)
-6. `Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it. Cost: nothing but the log. Time: 5 minutes.` (152 karakter)
+| Deposit | FARM | THIN | SKIP |
+|---|---|---|---|
+| $500 | 0 | 1 | 197 |
+| **$1.000** | **0** | **2** | **196** |
+| $5.000 | 0 | 4 | 194 |
+| $10.000 | 0 | 6 | 192 |
 
-### Contoh 3 — kecil: Firelight (rank 63, Insurance, TVL $51,3 jt, Flare, implied $8,5 jt)
+**Tidak ada satu pun baris FARM pada ukuran berapa pun.** Ini temuan,
+bukan bug — dan tidak disembunyikan dengan mengubah asumsi. Alasan
+aritmetikanya: FARM butuh slice_rate ≥ ~0,111 per $1 deposit
+(10× forgone rate 0,0111), sementara slice_rate = 0,1 ×
+(implied/TVL) × time_share; nilai tertinggi di seluruh board hanya
+0,059 (swan-dao: rasio 0,603 × time share 0,978) — jadi tidak satu
+pun baris yang bisa mencapai FARM di bawah asumsi-asumsi ini. Dua
+baris THIN pada $1.000 adalah yang paling dekat:
 
-1. `Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline. Cost: under $1 of gas for the first transaction. Time: 5 minutes.` (162 karakter)
-2. `Buy $100 of cover from Firelight on Flare and keep the policy active. Cost: $100 of capital and about $1 of gas. Time: 15 minutes to set up.` (140 karakter)
-3. `Repeat one qualifying action each week, such as renewing cover or adding a second policy on Firelight. Cost: about $1 of gas a week. Time: 10 minutes a week.` (157 karakter)
-4. `Hold the policy for at least 45 days so the activity is counted in more than one snapshot. Cost: the $100 stays in the policy. Time: 45 days.` (141 karakter)
-5. `Before the policy ends, open Firelight's own points or rewards page and claim only from the link it publishes. Cost: no fee to check, and never pay to claim. Time: 10 minutes.` (175 karakter)
-6. `Write the wallet, the dates and every transaction in a farm log so you can repeat the position or unwind it. Cost: nothing but the log. Time: 5 minutes.` (152 karakter)
+| Baris | Slice $1K | Net $1K | Break-even | Net/jam |
+|---|---|---|---|---|
+| loopscale-curation | $46,60 | +$34,01 | 0,27 | +$10,74/jam |
+| goonfi | $41,40 | +$28,80 | 0,30 | +$9,09/jam |
 
-Semua 18 langkah di atas terverifikasi 140–183 karakter (dalam 20–600), 6 langkah
-per protokol (dalam 3–12). Catatan Firelight: umur 340 hari → hold 45 hari
-(<365 hari); modal $100 karena TVL $51,3 jt (tier ≥$50 jt).
+THIN tambahan pada $10.000: hertzflow (BE 0,33), valantis-sthype-
+restaking (0,27), monarq (0,29), swan-dao (0,32). Slice $1K terbesar:
+swan-dao $58,97 — tetap SKIP karena gas Ethereum-nya $75 (15 × $5)
+ditambah forgone $11,10. Sebaliknya, baris-baris raksasa (Sentora,
+Steakhouse) punya slice $1K hanya $0,35–0,45: $1.000 adalah
+0,000036% dari TVL $2,75 miliar, dan time share 90/(543+90) = 0,14
+memotongnya lagi. Dashboard harus menampilkan ini sebagai "best
+farms" yang sebenarnya (THIN teratas + penjelasan), bukan mengarang
+FARM. Bila parent ingin ambang atau asumsi diubah (mis. yield posisi
+3,5% seperti satu entry 10 besar, atau tanpa time share), itu
+keputusan eksplisit — bukan perubahan diam-diam di model.
 
----
+### Langkah farm (8 langkah bertanggal, per protokol)
 
-## (f) Hasil model — top 20 & sebaran nilai (N = 178, `radar-2`)
+1. **Day 0** — dompet baru, seed offline. Cost: 1× gas. Time: 5 mnt.
+2. **Day 0** — aksi utama menurut kategori (deposit vault / supply /
+   likuiditas / beli aset RWA / …) $1.000 di chain utama. Cost: $1.000
+   + 1× gas. Time: 15 mnt.
+3. **Weeks 1–12** — satu aksi kualifikasi tiap minggu. Cost: 12× gas.
+   Time: 10 mnt/minggu (2 jam).
+4. **Week 6** — cek perubahan TVL 7 hari: bila TVL tutup di bawah
+   **80% TVL saat deposit** (angka dolar spesifik protokol itu),
+   tarik setengah hari itu juga (biaya 1 transaksi tambahan, disebut
+   eksplisit). Cost: $0 untuk cek. Time: 10 mnt.
+5. **Day 90** — buka halaman points/rewards resmi protokol, klaim
+   hanya dari tautan yang diterbitkannya; jangan pernah bayar untuk
+   klaim. Cost: $0. Time: 15 mnt.
+6. **Day 90** — tarik deposit $1.000, kecuali stop rule minggu ke-6
+   sudah keluar. Cost: 1× gas. Time: 10 mnt.
+7. **Day 90** — tulis dompet, tanggal, dan semua hash transaksi di
+   farm log. Cost: $0. Time: 5 mnt.
+8. **Day 90** — putuskan: bila belum ada token dan TVL masih di atas
+   level stop, tahan 90 hari lagi atau keluar; jangan tambah dana
+   tanpa cek baru. Cost: $0. Time: 10 mnt.
 
-| Rank | Slug | Kategori | TVL | 7d | Umur | Mult | Growth | Mat. | Chain | Implied |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | steakhouse-financial | Risk Curators | $2,75 B | −2,19% | 543 h | 0,667 | 0,991 | 0,899 | 1,20 | **$1,96 B** |
-| 2 | gauntlet | Risk Curators | $1,58 B | +5,65% | 543 h | 0,667 | 1,023 | 0,899 | 1,20 | **$1,16 B** |
-| 3 | nonce-capital | Risk Curators | $513,8 jt | −9,74% | 45 h | 0,667 | 0,961 | 0,808 | 1,05 | **$279,3 jt** |
-| 4 | veda | Onchain Capital Allocator | $1,56 B | −8,29% | 632 h | 0,148 | 0,967 | 0,915 | 1,20 | **$245,8 jt** |
-| 5 | usdd | CDP | $1,06 B | −2,81% | 611 h | 0,191 | 0,989 | 0,912 | 1,10 | **$200,3 jt** |
-| 6 | rockawayx | Risk Curators | $292,5 jt | −2,55% | 233 h | 0,667 | 0,990 | 0,843 | 1,20 | **$195,1 jt** |
-| 7 | hyperithm | Risk Curators | $221,6 jt | −4,38% | 543 h | 0,667 | 0,983 | 0,899 | 1,20 | **$156,6 jt** |
-| 8 | k3-capital | Risk Curators | $207,7 jt | −8,90% | 543 h | 0,667 | 0,964 | 0,899 | 1,20 | **$144,1 jt** |
-| 9 | hive-protocol | Chain | $198,8 jt | −10,18% | 925 h | 0,675 | 0,959 | 0,969 | 1,00 | **$124,7 jt** |
-| 10 | clearstar | Risk Curators | $161,8 jt | −10,09% | 543 h | 0,667 | 0,960 | 0,899 | 1,20 | **$111,7 jt** |
-| 11 | bittensor-dtao | Dexs | $376,0 jt | −6,56% | 56 h | 0,299 | 0,974 | 0,810 | 1,00 | **$88,8 jt** |
-| 12 | upshift | Onchain Capital Allocator | $499,1 jt | +8,31% | 710 h | 0,148 | 1,033 | 0,930 | 1,20 | **$85,2 jt** |
-| 13 | galaxy-curation | Risk Curators | $130,0 jt | +11,23% | 177 h | 0,667 | 1,045 | 0,832 | 1,10 | **$82,9 jt** |
-| 14 | onre | RWA | $308,9 jt | +0,11% | 488 h | 0,250 | 1,000 | 0,889 | 1,00 | **$68,6 jt** |
-| 15 | opentrade | RWA | $241,5 jt | −1,64% | 708 h | 0,250 | 0,993 | 0,929 | 1,10 | **$61,3 jt** |
-| 16 | armitage-by-wintermute | Risk Curators | $103,5 jt | +5,77% | 178 h | 0,667 | 1,023 | 0,833 | 1,00 | **$58,7 jt** |
-| 17 | plume-vaults | RWA | $211,5 jt | −3,08% | 749 h | 0,250 | 0,988 | 0,937 | 1,20 | **$58,7 jt** |
-| 18 | noble | Chain | $83,0 jt | −5,23% | null | 0,675 | 0,979 | 0,900 | 1,00 | **$49,4 jt** |
-| 19 | symbiotic | Collateral Markets | $253,9 jt | −12,03% | 886 h | 0,205 | 0,952 | 0,962 | 1,00 | **$47,6 jt** |
-| 20 | keyrock | Risk Curators | $83,1 jt | −0,60% | 73 h | 0,667 | 0,998 | 0,813 | 1,05 | **$47,2 jt** |
-
-**Sebaran nilai board (N = 178):** maks **$1,96 B** · median **$4,5 jt** ·
-min **$657.684** (Nucleus) · 178 nilai berbeda · monotonik menurun terverifikasi
-(tidak ada dua nilai berurutan yang naik; tidak semua sama). Top-20 seluruhnya
-watchlist; seluruh 40 watchlist berada di rank 1–64. Lima terbawah board:
-valantis-sthype-restaking $990.314 · swan-dao $940.552 · granite $820.089 ·
-flying-tulip-ftusd $709.402 · nucleus $657.684.
-
-**Bacaan top-20:** Risk Curators mendominasi puncak bukan karena namanya, tapi
-karena kombinasi yang bisa diaudit: TVL besar + multiple kategori tertinggi
-setelah shrinkage (0,667) + multi-chain. Veda/Upshift (TVL $1,56 B/$499 jt)
-jatuh ke #4/#12 karena multiple allocator hanya 0,148 — pasar peer menilai
-kategori itu murah. Nonce Capital (#3) menarik: TVL hanya $513,8 jt tapi umur
-45 hari + multiple kurator mengangkatnya di atas Veda yang TVL-nya 3× lipat.
-Bittensor dTAO (#11) menunjukkan batas model: TVL $376 jt tapi single-chain
-dan umur 56 hari menahannya di bawah $100 jt.
-
-**Perbandingan vs starter (`radar-1`, N=200):** starter top-5 maks $543,6 jt,
-median $4,1 jt — model ini memberi top yang ~3,6× lebih besar karena multiple
-kategori (0,667 vs 0,25 seragam) dan karena chain multiplier. Overlap top-10
-dengan starter hanya 5/10 — model ini benar-benar ranking yang berbeda, bukan
-starter dengan label baru.
-
-**Verifikasi yang dijalankan** (skrip sekali jalan, Node 22.23.4,
-`/tmp/token-radar-analysis.js` + `/tmp/check-strict-top.js` + `/tmp/check-filter.js`,
-pada snapshot yang sama): coverage watchlist 40/40; rank 1..178 unik; implied
-integer positif ≤ 1e14; monotonik menurun; 178 nilai berbeda; farm_steps 6
-langkah × 20–600 karakter (contoh terverifikasi 140–183 karakter).
+Semua langkah 130–267 karakter (gate 20–600), 8 langkah per baris
+(gate 3–12). **Tidak mengarang program insentif**: snapshot tidak
+berisi data points/airdrop apa pun, jadi langkah 5 selalu berbunyi
+"cek halaman resmi" — tidak pernah mengklaim ada program bila tidak
+ada datanya.
 
 ---
 
-## Catatan untuk builder
+## (f) Hasil model — validasi, top 20 & sebaran nilai (N = 198, `radar-3`)
 
-1. Ganti `MODEL` starter dengan konstanta `radar-2` di atas; naikkan
-   `MODEL_VERSION` ke `radar-2`; ganti `EARLY_ROWS = 160` (pilih menurut TVL)
-   dengan seleksi menurut **skor model + filter ketat §d** (tidak ada angka
-   cutoff — ambil semua yang lolos).
-2. Tampilkan per baris: keempat pengali (multiple, growth, maturity, chain)
-   dan umur — juri kriteria 2 menilai apakah model "mengikuti angka snapshot",
-   dan angka itu harus terlihat di dashboard, bukan hanya di dossier.
-3. Tampilkan multiple kategori di view Live ("dari 128 token yang sudah
-   diperdagangkan inilah multiple tiap kategori dihitung") — ini bukti model.
-4. Farm steps dihasilkan dari template §e; jangan tulis langkah per protokol
-   secara manual (tidak scalable dan melanggar "bukan daftar nama hardcoded").
-5. Satu-satunya hal yang boleh berubah antar run adalah snapshot itu sendiri:
-   semua konstanta (k=5, clamp, bobot, cap) adalah bagian dari model dan
+### Perbandingan metode fit (LOO n=105; WF = rata-rata 3 cutoff)
+
+| Metode | Varian | LOO miss | LOO within-3× | LOO ρ | WF miss |
+|---|---|---|---|---|---|
+| OLS | curve-only | ×3,27 | 47,62% | 0,33 | ×2,53 |
+| OLS | curve+category | ×3,45 | 45,71% | 0,32 | ×2,51 |
+| **Huber** | **curve-only** | **×3,18** | **47,62%** | **0,34** | **×2,38** |
+| **Huber** | **curve+category** | ×3,37 | 44,76% | 0,33 | ×2,40 |
+| Theil–Sen | curve-only | ×3,19 | 43,81% | 0,30 | ×2,52 |
+| Theil–Sen | curve+category | ×3,43 | 45,71% | 0,32 | ×2,52 |
+
+### Ablasi (Huber, 105 peer)
+
+| Varian | LOO miss | LOO within-3× | LOO ρ | WF miss |
+|---|---|---|---|---|
+| curve-only | ×3,18 | 47,62% | 0,34 | ×2,38 |
+| curve+category | ×3,37 | 44,76% | 0,33 | ×2,40 |
+| **curve+category+growth (final)** | **×3,28** | **46,67%** | **0,33** | **×2,40** |
+| curve+category+tenure | ×3,38 | 44,76% | 0,32 | ×2,47 |
+| curve+category+breadth | ×3,61 | 44,76% | 0,31 | ×2,39 |
+| curve+category+growth+tenure+breadth | ×3,83 | 45,71% | 0,31 | ×2,41 |
+| curve+category × launch-odds | ×3,82 | 39,05% | 0,28 | ×4,13 |
+
+### Model final vs baseline flat (median rasio mcap/TVL, peer yang sama)
+
+| | LOO miss | LOO within-3× | LOO ρ | WF miss | WF within-3× |
+|---|---|---|---|---|---|
+| **radar-3 (final)** | **×3,28** | **46,67%** | **0,33** | **×2,40** | **52,55%** |
+| Flat multiple | ×5,02 | 35,24% | 0,37 | ×4,83 | 37,30% |
+
+Walk-forward final per cutoff — fit pada `listed_at` lama, uji pada
+token yang lebih baru: pre-2023 (train 19 / test 61) ×2,80, 54,10%,
+ρ 0,31 · pre-2024 (36/44) ×2,12, 52,27%, ρ 0,34 · pre-2024-07
+(41/39) ×2,27, 51,28%, ρ 0,36. Rata-rata ×2,40 / 52,55% / 0,34.
+Catatan jujur: ρ flat (0,37) sedikit lebih tinggi dari ρ model (0,33)
+di LOO — kurva mengorbankan sedikit urutan demi kesalahan absolut
+yang jauh lebih kecil; ranking board tetap terutama ditentukan kurva
++ offset, dan ρ 0,33–0,34 sejalan dengan 0,34–0,41 yang dilaporkan
+10 besar. Target patokan 10 besar (LOO ×2,68–×3,52 vs flat ×4,4–
+×6,0) **tercapai**: LOO ×3,28 vs flat ×5,02; WF ×2,40 vs flat ×4,83.
+
+### Band ketidakpastian (blind band + rank range)
+
+Residual LOO (log10 actual/pred) kuantil: p10 −1,0727 · p25 −0,4940 ·
+p75 +0,5287 · p90 +0,9619 — sebagai pengali: **0,085× / 0,321× /
+3,38× / 9,16×**. Band tiap baris = implied × pengali itu. Cakupan
+pada 105 peer: **P25–P75 menampung 50,48%** caps riil,
+**P10–P90 menampung 79,05%** — sesuai konstruksi dan sejalan dengan
+klaim 10 besar (48% / 80%). Band ini lebar karena memang begitu
+ketidakpastiannya: Sentora P25–P75 $21,8–230,1 jt, P10–P90
+$5,8–623,9 jt. Versi awal (band dari bootstrap refits saja) hanya
+menampung 12,38% / 20,95% — band sempit yang menyesatkan — dan
+dibuang; rank range tetap dari 200 bootstrap refits (mis. Sentora
+1–3, Steakhouse 2–4, USDD 4–49, Bittensor dTAO 1–74 — lebar karena
+banyak baris mengumpul di $20–40 jt).
+
+### Top 20 (N = 198)
+
+| Rank | Slug | Kategori | TVL | 7d | Umur (hari) | Kurva | ×Kat | ×Growth | Implied | P25–P75 | Rank range | Odds | Slice $1K | Net $1K | BE | Verdict |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | sentora-curator | Risk Curators | $2,758 B | +2,37% | 407 | $58,4 jt | 1,160 | 1,005 | **$68,1 jt** | $21,8–230,1 jt | 1–3 | 0,38 | $0,45 | −$85,65 | 192,5 | SKIP |
+| 2 | steakhouse-financial | Risk Curators | $2,754 B | −2,19% | 543 | $58,4 jt | 1,160 | 0,995 | **$67,4 jt** | $21,6–227,6 jt | 2–4 | 0,38 | $0,35 | −$18,25 | 53,5 | SKIP |
+| 3 | gauntlet | Risk Curators | $1,578 B | +5,65% | 543 | $45,5 jt | 1,160 | 1,013 | **$53,5 jt** | $17,1–180,6 jt | 3–6 | 0,38 | $0,48 | −$18,11 | 38,6 | SKIP |
+| 4 | veda | Onchain Capital Allocator | $1,563 B | −8,29% | 632 | $45,3 jt | 0,842 | 0,981 | **$37,5 jt** | $12,0–126,5 jt | 4–13 | 0,38 | $0,30 | −$18,30 | 62,3 | SKIP |
+| 5 | usdd | CDP | $1,056 B | −2,81% | 611 | $38,0 jt | 0,972 | 0,994 | **$36,7 jt** | $11,8–124,0 jt | 4–49 | 0,38 | $0,45 | −$25,65 | 58,4 | SKIP |
+| 6 | polymarket-international | Prediction Market | $320 jt | −1,08% | 1.845 | $22,3 jt | 1,650 | 0,998 | **$36,7 jt** | $11,8–124,0 jt | 1–21 | 0,80 | $0,53 | −$18,06 | 34,9 | SKIP |
+| 7 | nonce-capital | Risk Curators | $514 jt | −9,74% | 45 | $27,6 jt | 1,160 | 0,978 | **$31,3 jt** | $10,0–105,6 jt | 4–14 | 0,26 | $4,06 | −$82,04 | 21,2 | SKIP |
+| 8 | bittensor-dtao | Dexs | $376 jt | −6,56% | 56 | $24,0 jt | 1,125 | 0,985 | **$26,6 jt** | $8,5–89,7 jt | 1–74 | 0,26 | $4,35 | −$21,74 | 6,0 | SKIP |
+| 9 | onre | RWA | $309 jt | +0,11% | 488 | $22,0 jt | 1,199 | 1,000 | **$26,3 jt** | $8,4–88,9 jt | 4–27 | 0,38 | $1,33 | −$11,27 | 9,5 | SKIP |
+| 10 | rockawayx | Risk Curators | $293 jt | −2,55% | 233 | $21,4 jt | 1,160 | 0,994 | **$24,7 jt** | $7,9–83,5 jt | 6–19 | 0,40 | $2,35 | −$83,74 | 36,6 | SKIP |
+| 11 | opentrade | RWA | $242 jt | −1,64% | 708 | $19,7 jt | 1,199 | 0,996 | **$23,5 jt** | $7,5–79,3 jt | 6–35 | 0,38 | $1,10 | −$25,00 | 23,8 | SKIP |
+| 12 | upshift | Onchain Capital Allocator | $499 jt | +8,31% | 710 | $27,2 jt | 0,842 | 1,019 | **$23,4 jt** | $7,5–78,9 jt | 6–34 | 0,38 | $0,53 | −$85,57 | 163,5 | SKIP |
+| 13 | bitfi-basis | Basis Trading | $215 jt | −10,26% | 638 | $18,7 jt | 1,239 | 0,977 | **$22,6 jt** | $7,2–76,3 jt | 1–32 | 0,38 | $1,30 | −$24,80 | 20,1 | SKIP |
+| 14 | plume-vaults | RWA | $212 jt | −3,08% | 749 | $18,5 jt | 1,199 | 0,993 | **$22,1 jt** | $7,1–74,5 jt | 7–38 | 0,55 | $1,12 | −$84,98 | 76,9 | SKIP |
+| 15 | hyperithm | Risk Curators | $222 jt | −4,38% | 543 | $18,9 jt | 1,160 | 0,990 | **$21,7 jt** | $7,0–73,4 jt | 8–27 | 0,38 | $1,39 | −$17,20 | 13,3 | SKIP |
+| 16 | r25 | RWA | $198 jt | +0,30% | 199 | $18,0 jt | 1,199 | 1,001 | **$21,6 jt** | $6,9–73,0 jt | 9–41 | 0,40 | $3,39 | −$22,70 | 7,7 | SKIP |
+| 17 | k3-capital | Risk Curators | $208 jt | −8,90% | 543 | $18,4 jt | 1,160 | 0,980 | **$20,9 jt** | $6,7–70,6 jt | 9–31 | 0,38 | $1,43 | −$17,17 | 13,0 | SKIP |
+| 18 | hive-protocol | Chain | $199 jt | −10,18% | 925 | $18,0 jt | 1,171 | 0,977 | **$20,6 jt** | $6,6–69,6 jt | 7–32 | 0,55 | $0,92 | −$25,18 | 28,4 | SKIP |
+| 19 | defi-saver-asset-management | CDP Manager | $276 jt | −19,58% | null | $20,9 jt | 1,000 | 0,956 | **$20,0 jt** | $6,4–67,5 jt | 11–30 | 0,79 | $1,02 | −$85,08 | 84,5 | SKIP |
+| 20 | symbiotic | Collateral Markets | $254 jt | −12,03% | 886 | $20,1 jt | 1,000 | 0,973 | **$19,6 jt** | $6,3–66,1 jt | 12–31 | 0,55 | $0,71 | −$85,39 | 121,2 | SKIP |
+
+(TVL dalam dolar, B = miliar, jt = juta; umur dalam hari. Build-up per
+baris memeriksa eksak: kurva × ×Kat × ×Growth = implied ±$1 — faktor
+disimpan presisi penuh di `board.json`.)
+
+**Sebaran nilai board (N = 198):** maks **$68,1 jt** (Sentora Curator)
+· median **$7,12 jt** · min **$2,74 jt** (Nucleus) · total board
+**$1,99 miliar** · 198 nilai berbeda · monotonik menurun
+terverifikasi. Watchlist menempati rank 2–93 (16 dari top-20 adalah
+watchlist, 4 adalah above-floor). Lima terbawah: btcfi-cdp $3,59 jt ·
+qearn $3,32 jt · granite $3,13 jt · flying-tulip-ftusd $3,06 jt ·
+nucleus $2,74 jt.
+
+**Bacaan top-20:** Sentora Curator #1 bukan karena namanya — TVL
+$2,76 miliar yang nyaris sama dengan Steakhouse ($2,75 miliar),
+kategori yang sama, growth +2,37% vs −2,19% yang menggesernya ke
+depan. Polymarket International #6 menunjukkan kerja offset:
+Prediction Market ×1,650 (dari satu peer, di-shrink kuat) mengangkat
+TVL $320 jt ke $36,7 jt. Veda/Upshift jatuh karena offset allocator
+0,842. Nonce Capital (#7, umur 45 hari) membuktikan tenure TIDAK
+dipakai: ia naik murni karena kurva + kategori + growth, bukan karena
+umurnya.
+
+**Perbandingan vs `radar-2` (N=178):** top-1 $1,96 miliar → $68,1 jt
+(29× lebih kecil); median $4,5 jt → $7,12 jt; board 178 → 198
+(+20 above-floor). Overlap top-10 dengan `radar-2`: 8/10 nama sama,
+urutan dan level berubah total.
+
+**Verifikasi yang dijalankan** (Node 22.23.4,
+`~/workspace/makefun/node22/bin/node main.ts` ke `/tmp/out1` dan
+`/tmp/out2` pada snapshot yang sama): coverage watchlist 40/40; rank
+1..198 unik; implied integer positif ≤ 1e14; monotonik menurun; 198
+nilai berbeda; farm_steps 8 langkah × 130–267 karakter;
+`diff -r` kedua run **byte-identik**; `data.js` 782.767 byte,
+`board.json` 1.094.869 byte (di bawah cap gate 8 MiB). `makefun
+check` kit: satu-satunya gagal adalah `transcripts_present` (tidak
+ada transkrip yang disertakan pada pengecekan lokal ini — urusan
+submit, bukan model); check ini tidak menilai board secara lokal
+("there is no local grade of this competition, the server grades
+every entry").
+
+---
+
+## (g) Batasan yang jujur
+
+1. **Tidak ada sibling/parent haircut — dan itu dinyatakan, bukan
+   disembunyikan.** Snapshot tidak punya field `parentProtocol`.
+   Lima baris above-floor teratas (Sentora Curator, Polymarket
+   International, BitFi Basis, Extended Perps, Defi Saver Asset
+   Management) tercatat pre-token dengan kategori/nama bersih, dan
+   tidak ada slug parent mereka ("sentora", "polymarket", "extended",
+   "defi-saver", "bitfi") di dalam snapshot. Maka tidak ada haircut
+   berbasis parent yang diterapkan. Bila DefiLlama di luar snapshot
+   mencatat mereka sebagai produk turunan, board ini menilai mereka
+   apa adanya dari snapshot — juri yang memakai data luar dapat
+   menilai berbeda, dan itu risiko yang dicatat di sini.
+2. **Offset kategori lemah pada 105 peer.** Pada peer set yang
+   dipakai, offset hampir tidak membantu blind test (lihat §c) — ia
+   dipertahankan atas dasar WF netral + pembedaan kategori yang nyata,
+   bukan karena LOO membaik. Satu peer (Rain, Prediction Market)
+   tetap menggerakkan offset kategorinya meski sudah di-shrink k=12.
+3. **Rank correlation moderat (ρ 0,33–0,34).** Model memprediksi
+   level nilai jauh lebih baik daripada urutan persisnya; rank range
+   yang lebar (mis. Bittensor dTAO 1–74) adalah konsekuensi yang
+   jujur dari baris-baris yang mengumpul di $20–40 jt.
+4. **Band lebar.** P10–P90 satu baris membentang ~100× (0,085×–
+   9,16×). Itu ukuran ketidakpastian yang sebenarnya dari data ini —
+   bukan cacat presentasi. Implied value adalah estimasi titik di
+   tengah ketidakpastian sebesar itu.
+5. **Farm economics memakai asumsi yang dinyatakan, bukan data.**
+   Airdrop share 10%, time share 90/(age+90), gas per chain, dan
+   T-bill 4,5% adalah asumsi — bila salah satunya salah, verdict
+   berubah. Hasil yang paling sensitif: **tidak ada FARM pada ukuran
+   berapa pun** (§e) — itu konsekuensi asumsi-asumsi tersebut, dan
+   mengubah asumsi untuk mendapatkan FARM tanpa mengatakannya adalah
+   manipulasi.
+6. **Launch odds bukan probabilitas launch.** Odds adalah share
+   historis protokol seumur yang mencatat token — korelasi umur,
+   bukan prediksi bahwa protokol ini akan launch. Odds tidak pernah
+   dikalikan ke implied value (§c).
+7. **Snapshot beku 2026-11-14.** Semua angka mengikuti snapshot
+   itu; TVL, harga, dan status token setelah tanggal itu tidak
+   tercermin.
+
+---
+
+## Catatan untuk builder (dashboard)
+
+1. Ganti `MODEL` dengan konstanta `radar-3` di atas; naikkan
+   `MODEL_VERSION` ke `radar-3`. Konstanta fit (a, b, offsets)
+   dihitung dari snapshot saat run — jangan hardcode angka §c ke
+   dashboard; baca dari `data.js` → `fit`.
+2. Tampilkan per baris: build-up (kurva × ×Kat × ×Growth = implied),
+   band P10–P25–P75–P90, rank range, launch odds, nearest comps
+   (TVL, mcap, model, miss ×), dan ekonomi farm lengkap (§e).
+   Kontrak field per baris ada di laporan pekerja model ke parent
+   (data contract) — field-field itu sudah ada di `board.json` /
+   `data.js` hasil run ini.
+3. Tampilkan di cover: rumus + scatter log-log (peer vs kurva +
+   band) + tabel validasi (LOO ×3,28 vs flat ×5,02; WF ×2,40 vs
+   ×4,83; within-3× 46,67%; band coverage 50,48%/79,05%) + strip
+   akuntansi 758 = 198 + 416 + 144 + seal "page = board.json".
+4. Farm steps dihasilkan dari template §e (8 langkah, day 0 /
+   weekly / week 6 / day 90); jangan tulis langkah per protokol
+   secara manual.
+5. Satu-satunya hal yang boleh berubah antar run adalah snapshot itu
+   sendiri: semua konstanta (§c, §e) adalah bagian dari model dan
    ditampilkan di dashboard.
 
-*Disusun 2026-11-17 dari `snapshot.json` as_of 2026-11-14. Tidak ada data luar
-snapshot yang dipakai; tidak ada nama protokol yang di-hardcode dalam model.*
+*Disusun 2026-11-17 dari `snapshot.json` as_of 2026-11-14. Tidak ada
+data luar snapshot yang dipakai; tidak ada nama protokol yang
+di-hardcode dalam model.*
