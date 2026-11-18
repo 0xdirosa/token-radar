@@ -1,9 +1,9 @@
-// Token Radar — value model `radar-3` and farm plans (MODEL.md, MODEL v3).
+// Token Radar — value model `radar-4` and farm plans (MODEL.md, MODEL v4).
 //
 // Implied value follows only from the snapshot's own figures:
 //
 //   log10(implied) = a + b * log10(tvl_usd / $100M)   // size curve, Huber fit
-//                    + category_offset(category)       // shrunk median residual
+//                    + category_offset(category)       // shrunk median residual, k=100
 //                    + 0.1 * clamp(change_7d, -60, 120) / 100   // 7-day growth
 //
 //   implied = max(1, round(10 ^ log10(implied)))
@@ -11,11 +11,14 @@
 // The size curve is fitted on the snapshot's token-bearing protocols, minus
 // the categories the house rule itself excludes from the board (Bridge,
 // Canonical Bridge, CEX: exchange and bridge tokens price a different thing
-// from a protocol's own token). The fit method (Huber), the peer set and the
-// extra terms were chosen by blind test, not by preference: see MODEL.md for
-// the leave-one-out / walk-forward / ablation table. Terms the blind test
-// did not keep — tenure, chain breadth, a launch-odds multiplier — are NOT
-// in the formula; launch odds are shown per row as context only.
+// from a protocol's own token). The fit method (Huber), the peer set, the
+// shrinkage (k=100) and the extra terms were chosen by blind test, not by
+// preference: see MODEL.md for the leave-one-out / walk-forward / ablation
+// table. Terms the blind test did not keep — tenure, chain breadth, a
+// launch-odds multiplier — are NOT in the formula; launch odds are shown per
+// row as context only. Category offsets are kept but shrunk hard (k=100):
+// the blind test keeps only a trace of category signal at n=105 peers, so a
+// category moves a row only where its peers are plentiful.
 //
 // Uncertainty has two measured parts: the value band is the blind band —
 // the point prediction times the leave-one-out residuals' quantiles, so
@@ -23,11 +26,16 @@
 // and the rank range comes from 200 bootstrap refits with a seeded PRNG.
 //
 // Farm economics per row (default deposit $1,000, sizes $500/$1K/$5K/$10K):
-//   slice = 10% airdrop share x implied x deposit/TVL x time share,
-//   time share = 90 / (age_days + 90); costs = gas (15 tx) + forgone
-//   T-bill yield 4.5% over 90 days; break-even odds = costs / slice;
-//   FARM if break-even <= 10%, THIN if <= 33%, else SKIP. All rates and
-//   shares are stated assumptions, not snapshot facts.
+//   slice = 10% airdrop share x implied x deposit/TVL (no dilution haircut:
+//   the slice is conditional on the token launching; launch odds are shown
+//   separately as context, never multiplied in);
+//   costs = gas (15 tx) + forgone yield, where forgone is the T-bill rate
+//   4.5% MINUS the yield the farmed position itself earns (3.5% a year for
+//   yield-bearing buckets — vault, lending, LP, RWA, basis, perps, restake,
+//   staking, CeDeFi — 0% where the position earns nothing), over 90 days;
+//   break-even odds = costs / slice; FARM if break-even <= 10%, THIN if
+//   <= 33%, else SKIP. All rates and shares are stated assumptions, not
+//   snapshot facts.
 //
 // The board is the watchlist without its floor and without its ceiling:
 // every watchlist slug, plus every pre-token protocol above the floor that
@@ -64,7 +72,7 @@ export interface Snapshot {
   watchlist: string[];
 }
 
-/** The `radar-3` assumptions. Fitted numbers (a, b, offsets) are computed
+/** The `radar-4` assumptions. Fitted numbers (a, b, offsets) are computed
  *  from the snapshot at run time and live in `FitResult`, not here. */
 export interface ModelConstants {
   fit_method: string;
@@ -77,6 +85,10 @@ export interface ModelConstants {
   unknown_age_days: number;
   airdrop_share: number;
   tbill_rate: number;
+  /** Yield the farmed position itself earns per year (stated assumption):
+   *  vaults, lending, LP and staking positions pay yield; netting it against
+   *  the T-bill rate is what "forgone yield" means. Applied per bucket. */
+  position_yield_rate: number;
   hold_days: number;
   tx_count: number;
   gas_usd_ethereum: number;
@@ -93,13 +105,14 @@ export const MODEL: ModelConstants = {
   fit_method: 'huber',
   fit_peer_exclude_categories: ['Bridge', 'Canonical Bridge', 'CEX'],
   curve_reference_tvl_usd: 100_000_000,
-  cat_shrinkage_k: 12,
+  cat_shrinkage_k: 100,
   growth_weight_log10: 0.1,
   growth_floor: -60,
   growth_cap: 120,
   unknown_age_days: 548,
   airdrop_share: 0.1,
   tbill_rate: 0.045,
+  position_yield_rate: 0.035,
   hold_days: 90,
   tx_count: 15,
   gas_usd_ethereum: 5,
@@ -112,7 +125,7 @@ export const MODEL: ModelConstants = {
   bootstrap_seed: 20261117,
 };
 
-export const MODEL_VERSION = 'radar-3';
+export const MODEL_VERSION = 'radar-4';
 
 /** Live-token protocols the dashboard's Live view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -148,8 +161,14 @@ export interface FarmPlan {
   gas_usd_per_tx: number;
   fees_usd: number;
   forgone_usd: number;
+  /** Net forgone rate per year (T-bill minus the position's own yield). */
+  forgone_rate: number;
+  /** Yield the farmed position itself earns per year (0 for non-yielding buckets). */
+  position_yield_rate: number;
   total_cost_usd: number;
   hours: number;
+  /** Always 1 in radar-4: no dilution haircut (see farmEconomics). Kept so the
+   *  dashboard's data contract and the board's history stay comparable. */
   time_share: number;
   slice_usd: number;
   net_usd: number;
@@ -811,20 +830,44 @@ function verdictFor(breakeven: number, m: ModelConstants = MODEL): 'FARM' | 'THI
   return 'SKIP';
 }
 
+/** Yield the farmed position itself earns per year, by the plan's bucket
+ *  (see bucketFor): yield-bearing positions (vault, lending, LP, RWA, basis,
+ *  perps, restake, staking, CeDeFi) earn the stated 3.5% a year; a position
+ *  that earns nothing (insurance, payments, chain, governance, stable,
+ *  bridge, default) earns 0%. A stated assumption, not a snapshot fact. */
+export function positionYieldFor(p: SnapshotProtocol, m: ModelConstants = MODEL): number {
+  switch (bucketFor(p)) {
+    case 'vault':
+    case 'lending':
+    case 'dex':
+    case 'rwa':
+    case 'basis':
+    case 'perp':
+    case 'restake':
+    case 'staking':
+    case 'cedefi':
+      return m.position_yield_rate;
+    default:
+      return 0;
+  }
+}
+
 /** One deposit size priced: slice scales with deposit, forgone yield scales
- *  with deposit, gas does not — so bigger tickets clear costs more easily. */
+ *  with deposit, gas does not — so bigger tickets clear costs more easily.
+ *  Forgone yield is net: the T-bill rate minus what the position itself
+ *  earns, because the deposit is not idle while it farms. */
 function priceSize(
   p: SnapshotProtocol,
   implied: number,
-  timeShare: number,
   deposit: number,
   gas: number,
   hours: number,
+  posYield: number,
   m: ModelConstants = MODEL,
 ): FarmSize {
-  const slice = m.airdrop_share * implied * (deposit / p.tvl_usd) * timeShare;
+  const slice = m.airdrop_share * implied * (deposit / p.tvl_usd);
   const fees = m.tx_count * gas;
-  const forgone = deposit * m.tbill_rate * (m.hold_days / 365);
+  const forgone = deposit * (m.tbill_rate - posYield) * (m.hold_days / 365);
   const totalCost = fees + forgone;
   const net = slice - totalCost;
   const breakeven = slice > 0 ? totalCost / slice : Number.POSITIVE_INFINITY;
@@ -842,18 +885,28 @@ function priceSize(
 
 export function farmEconomics(p: SnapshotProtocol, implied: number, age: number | null, steps: FarmStep[], m: ModelConstants = MODEL): FarmPlan {
   const gas = gasPerTx(p, m);
-  const timeShare = m.hold_days / ((age ?? m.unknown_age_days) + m.hold_days);
+  const posYield = positionYieldFor(p, m);
+  // No dilution haircut in radar-4: the slice is conditional on the token
+  // launching (10% of implied value, pro-rata by deposit/TVL). The launch
+  // odds are shown per row as context and are never multiplied in — the same
+  // reason MODEL.md §c gives for not multiplying implied value by odds.
+  // radar-3's 90/(age+90) time share cut old protocols' slices up to 21x and
+  // put the model outside the consensus of the field's best boards; it is
+  // removed, not hidden: time_share stays 1 in the data so the change is visible.
+  const timeShare = 1;
   const hours = steps.reduce((s, st) => s + st.time_min, 0) / 60;
-  const main = priceSize(p, implied, timeShare, 1000, gas, hours, m);
+  const main = priceSize(p, implied, 1000, gas, hours, posYield, m);
   return {
     deposit_usd: 1000,
     tx_count: m.tx_count,
     gas_usd_per_tx: gas,
     fees_usd: main.fees_usd,
     forgone_usd: main.forgone_usd,
+    forgone_rate: round4(m.tbill_rate - posYield),
+    position_yield_rate: posYield,
     total_cost_usd: main.total_cost_usd,
     hours: round2(hours),
-    time_share: round4(timeShare),
+    time_share: timeShare,
     slice_usd: main.slice_usd,
     net_usd: main.net_usd,
     breakeven_odds: main.breakeven_odds,
@@ -861,7 +914,7 @@ export function farmEconomics(p: SnapshotProtocol, implied: number, age: number 
     verdict: main.verdict,
     stop_tvl_usd: Math.round(p.tvl_usd * 0.8),
     exit_tvl_usd: Math.round(p.tvl_usd * 0.5),
-    sizes: FARM_SIZES.map((d) => priceSize(p, implied, timeShare, d, gas, hours, m)),
+    sizes: FARM_SIZES.map((d) => priceSize(p, implied, d, gas, hours, posYield, m)),
     steps,
   };
 }
