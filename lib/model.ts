@@ -1,10 +1,11 @@
-// Token Radar — value model `radar-4` and farm plans (MODEL.md, MODEL v4).
+// Token Radar — value model `radar-5` and farm plans (MODEL.md, MODEL v5).
 //
 // Implied value follows only from the snapshot's own figures:
 //
 //   log10(implied) = a + b * log10(tvl_usd / $100M)   // size curve, Huber fit
 //                    + category_offset(category)       // shrunk median residual, k=100
 //                    + 0.1 * clamp(change_7d, -60, 120) / 100   // 7-day growth
+//                    + log10(sibling)                  // x0.5 if kin-linked (see below)
 //
 //   implied = max(1, round(10 ^ log10(implied)))
 //
@@ -15,10 +16,19 @@
 // shrinkage (k=100) and the extra terms were chosen by blind test, not by
 // preference: see MODEL.md for the leave-one-out / walk-forward / ablation
 // table. Terms the blind test did not keep — tenure, chain breadth, a
-// launch-odds multiplier — are NOT in the formula; launch odds are shown per
-// row as context only. Category offsets are kept but shrunk hard (k=100):
-// the blind test keeps only a trace of category signal at n=105 peers, so a
-// category moves a row only where its peers are plentiful.
+// launch-odds multiplier — are NOT in the formula; launch odds are never
+// multiplied into implied value. They DO weight the farm economics (below).
+// Category offsets are kept but shrunk hard (k=100): the blind test keeps
+// only a trace of category signal at n=105 peers, so a category moves a row
+// only where its peers are plentiful.
+//
+// Sibling haircut: a board row whose name's first word matches the first
+// word of a protocol whose token already trades is kin-linked — the two
+// products would share one launch, so pricing both at full standalone value
+// double-counts it. Such rows (7 of 198, found by rule from the snapshot,
+// never a hardcoded list) are valued at x0.5. The haircut is applied to the
+// implied value and its band; the fit and the blind tests are untouched
+// (they score token-bearing peers, never board rows).
 //
 // Uncertainty has two measured parts: the value band is the blind band —
 // the point prediction times the leave-one-out residuals' quantiles, so
@@ -26,16 +36,26 @@
 // and the rank range comes from 200 bootstrap refits with a seeded PRNG.
 //
 // Farm economics per row (default deposit $1,000, sizes $500/$1K/$5K/$10K):
-//   slice = 10% airdrop share x implied x deposit/TVL (no dilution haircut:
-//   the slice is conditional on the token launching; launch odds are shown
-//   separately as context, never multiplied in);
-//   costs = gas (15 tx) + forgone yield, where forgone is the T-bill rate
-//   4.5% MINUS the yield the farmed position itself earns (3.5% a year for
-//   yield-bearing buckets — vault, lending, LP, RWA, basis, perps, restake,
-//   staking, CeDeFi — 0% where the position earns nothing), over 90 days;
-//   break-even odds = costs / slice; FARM if break-even <= 10%, THIN if
-//   <= 33%, else SKIP. All rates and shares are stated assumptions, not
-//   snapshot facts.
+//   slice = 10% airdrop share x implied x deposit/TVL (conditional on the
+//   token launching; no dilution haircut);
+//   expected net = P(launch) x slice - costs, where P(launch) is the row's
+//   age-bucket odds — the share of snapshot protocols in its age bucket that
+//   record a token — and costs = gas + forgone yield over a 45-day hold.
+//   Gas counts only transactions the plan certainly needs: fund the wallet
+//   (1), approve USDC on EVM chains (1), deposit (1), claim (1), withdraw
+//   (1) — 5 on EVM chains, 4 elsewhere. No weekly transaction is charged:
+//   the snapshot records no points program, and a passive position needs
+//   none; the plan says to check the program's own page weekly and act
+//   only if it requires an on-chain action. Forgone yield is the T-bill
+//   rate 4.5% MINUS the yield the farmed position itself earns (3.5% a
+//   year for yield-bearing buckets — vault, lending, LP, RWA, basis,
+//   perps, restake, staking, CeDeFi — 0% where the position earns nothing).
+//   Verdicts are four levels from the expected net across the value band:
+//   ROBUST if expected net > 0 even at the band's low end (P25), FARM if
+//   > 0 at the point value, THIN if > 0 only at the high end (P75), else
+//   SKIP. Break-even odds = costs / slice (the launch odds at which the
+//   expected net is exactly zero). All rates and shares are stated
+//   assumptions, not snapshot facts.
 //
 // The board is the watchlist without its floor and without its ceiling:
 // every watchlist slug, plus every pre-token protocol above the floor that
@@ -90,13 +110,10 @@ export interface ModelConstants {
    *  the T-bill rate is what "forgone yield" means. Applied per bucket. */
   position_yield_rate: number;
   hold_days: number;
-  tx_count: number;
   gas_usd_ethereum: number;
   gas_usd_l2: number;
   gas_usd_solana: number;
   gas_usd_other: number;
-  verdict_farm_max_breakeven: number;
-  verdict_thin_max_breakeven: number;
   bootstrap_refits: number;
   bootstrap_seed: number;
 }
@@ -113,19 +130,16 @@ export const MODEL: ModelConstants = {
   airdrop_share: 0.1,
   tbill_rate: 0.045,
   position_yield_rate: 0.035,
-  hold_days: 90,
-  tx_count: 15,
+  hold_days: 45,
   gas_usd_ethereum: 5,
   gas_usd_l2: 0.5,
   gas_usd_solana: 0.1,
   gas_usd_other: 1,
-  verdict_farm_max_breakeven: 0.1,
-  verdict_thin_max_breakeven: 0.33,
   bootstrap_refits: 200,
   bootstrap_seed: 20261117,
 };
 
-export const MODEL_VERSION = 'radar-4';
+export const MODEL_VERSION = 'radar-5';
 
 /** Live-token protocols the dashboard's Live view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -150,9 +164,11 @@ export interface FarmSize {
   fees_usd: number;
   forgone_usd: number;
   total_cost_usd: number;
+  /** Expected net: P(launch) x slice - costs. */
   net_usd: number;
+  /** Launch odds at which the expected net is exactly zero (costs / slice). */
   breakeven_odds: number;
-  verdict: 'FARM' | 'THIN' | 'SKIP';
+  verdict: 'ROBUST' | 'FARM' | 'THIN' | 'SKIP';
 }
 
 export interface FarmPlan {
@@ -167,14 +183,16 @@ export interface FarmPlan {
   position_yield_rate: number;
   total_cost_usd: number;
   hours: number;
-  /** Always 1 in radar-4: no dilution haircut (see farmEconomics). Kept so the
+  /** Always 1 in radar-5: no dilution haircut (see farmEconomics). Kept so the
    *  dashboard's data contract and the board's history stay comparable. */
   time_share: number;
+  /** Slice if the token launches (conditional, not expected value). */
   slice_usd: number;
+  /** Expected net: P(launch) x slice - costs, at the point implied value. */
   net_usd: number;
   breakeven_odds: number;
   net_per_hour_usd: number;
-  verdict: 'FARM' | 'THIN' | 'SKIP';
+  verdict: 'ROBUST' | 'FARM' | 'THIN' | 'SKIP';
   stop_tvl_usd: number;
   exit_tvl_usd: number;
   sizes: FarmSize[];
@@ -219,6 +237,8 @@ export interface BoardRow {
     category_offset_log10: number;
     category_multiplier: number;
     growth_multiplier: number;
+    /** 0.5 for kin-linked rows (same first word as a token that trades), else 1. */
+    sibling_multiplier: number;
     age_days: number | null;
   };
   farm: FarmPlan;
@@ -251,6 +271,7 @@ export interface RadarRow {
   category_offset_log10: number;
   category_multiplier: number;
   growth_multiplier: number;
+  sibling_multiplier: number;
   farm: FarmPlan;
   nearest_comps: NearestComp[];
 }
@@ -569,7 +590,8 @@ export function sizeCurveValue(fit: FitModel, p: SnapshotProtocol, m: ModelConst
 }
 
 /* ------------------------------------------------------------------ */
-/* Launch odds (context only — never multiplied into implied value)    */
+/* Launch odds (weight the slice into expected net — never multiplied  */
+/* into implied value)                                                */
 /* ------------------------------------------------------------------ */
 
 /** Age buckets; odds = share of protocols in the bucket that record a
@@ -618,6 +640,44 @@ export function launchOddsMap(snapshot: Snapshot, asOf: string): Map<string, num
 
 export function launchOdds(snapshot: Snapshot, asOf: string, p: SnapshotProtocol): number {
   return launchOddsMap(snapshot, asOf).get(p.slug) ?? 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sibling haircut (kin-linked rows)                                   */
+/* ------------------------------------------------------------------ */
+
+/** First word of a name, lowercased: the brand a product belongs to. */
+function firstWord(name: string): string {
+  return name.split(' ')[0]!.toLowerCase();
+}
+
+/** Slugs of pre-token protocols that share their first word with a
+ *  protocol whose token already trades (cached per snapshot). Two products
+ *  of one project would share one launch, so pricing both at full
+ *  standalone value double-counts it: each is valued at half. Found by
+ *  rule from the snapshot, never a hardcoded list — 7 rows in this
+ *  snapshot, one of them (Mezo Earn) on the watchlist, so none can be
+ *  excluded; all are haircut instead. */
+const kinCache = new WeakMap<Snapshot, Set<string>>();
+
+export function kinSlugs(snapshot: Snapshot): Set<string> {
+  const cached = kinCache.get(snapshot);
+  if (cached !== undefined) return cached;
+  const tokenFirst = new Set<string>();
+  for (const p of snapshot.protocols) {
+    if (p.gecko_id !== null || p.symbol !== null) tokenFirst.add(firstWord(p.name));
+  }
+  const kin = new Set<string>();
+  for (const p of snapshot.protocols) {
+    if (isPreToken(p) && tokenFirst.has(firstWord(p.name))) kin.add(p.slug);
+  }
+  kinCache.set(snapshot, kin);
+  return kin;
+}
+
+/** 0.5 for kin-linked rows, else 1. */
+export function siblingMultiplier(snapshot: Snapshot, p: SnapshotProtocol): number {
+  return kinSlugs(snapshot).has(p.slug) ? 0.5 : 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -814,19 +874,47 @@ function firstChain(p: SnapshotProtocol): string {
   return p.chains.length > 0 ? p.chains[0]! : 'its main chain';
 }
 
+/** Layer-2 / side chains priced at the L2 gas rate. */
+const EVM_L2 = new Set(['Base', 'Arbitrum', 'Optimism', 'Monad', 'Polygon', 'Ink', 'Unichain', 'Katana', 'Linea', 'Scroll', 'Blast']);
+
+/** True for Ethereum and the L2 chains: ERC-20 deposits there need an approve. */
+function isEVMChain(p: SnapshotProtocol): boolean {
+  const chain = firstChain(p);
+  return chain === 'Ethereum' || EVM_L2.has(chain);
+}
+
 /** Gas per on-chain transaction, by main chain (stated assumption). */
 export function gasPerTx(p: SnapshotProtocol, m: ModelConstants = MODEL): number {
   const chain = firstChain(p);
   if (chain === 'Ethereum') return m.gas_usd_ethereum;
   if (chain === 'Solana') return m.gas_usd_solana;
-  const L2 = new Set(['Base', 'Arbitrum', 'Optimism', 'Monad', 'Polygon', 'Ink', 'Unichain', 'Katana', 'Linea', 'Scroll', 'Blast']);
-  if (L2.has(chain)) return m.gas_usd_l2;
+  if (EVM_L2.has(chain)) return m.gas_usd_l2;
   return m.gas_usd_other;
 }
 
-function verdictFor(breakeven: number, m: ModelConstants = MODEL): 'FARM' | 'THIN' | 'SKIP' {
-  if (breakeven <= m.verdict_farm_max_breakeven) return 'FARM';
-  if (breakeven <= m.verdict_thin_max_breakeven) return 'THIN';
+/**
+ * On-chain transactions the farm plan certainly needs, counted per action:
+ * fund the wallet (1), approve USDC on EVM chains (1), deposit (1), claim
+ * the airdrop (1), withdraw (1) — 5 on EVM chains, 4 elsewhere. No weekly
+ * transaction is charged: the snapshot records no points program, and a
+ * passive position needs none; the plan says to check the program's own
+ * page weekly and act only if it requires an on-chain action. Counting a
+ * weekly transaction for every row would charge for actions the snapshot
+ * gives no reason to believe happen; not charging the approve would
+ * undercount the deposit side on EVM chains, so it is charged.
+ */
+export function txCountFor(p: SnapshotProtocol, m: ModelConstants = MODEL): number {
+  void m;
+  return 4 + (isEVMChain(p) ? 1 : 0);
+}
+
+/** Four verdict levels from the expected net across the value band:
+ *  ROBUST pays even at the band's low end (P25), FARM at the point value,
+ *  THIN only at the high end (P75), SKIP never. */
+export function verdictForBand(netLo: number, netMid: number, netHi: number): 'ROBUST' | 'FARM' | 'THIN' | 'SKIP' {
+  if (netLo > 0) return 'ROBUST';
+  if (netMid > 0) return 'FARM';
+  if (netHi > 0) return 'THIN';
   return 'SKIP';
 }
 
@@ -855,21 +943,32 @@ export function positionYieldFor(p: SnapshotProtocol, m: ModelConstants = MODEL)
 /** One deposit size priced: slice scales with deposit, forgone yield scales
  *  with deposit, gas does not — so bigger tickets clear costs more easily.
  *  Forgone yield is net: the T-bill rate minus what the position itself
- *  earns, because the deposit is not idle while it farms. */
+ *  earns, because the deposit is not idle while it farms. Net is expected
+ *  value: the slice is conditional on launch, so it is weighted by the
+ *  launch odds, while the costs are paid whether or not the token launches.
+ *  The verdict is four levels from the expected net across the value band
+ *  (ROBUST at P25, FARM at the point value, THIN at P75, else SKIP). */
 function priceSize(
   p: SnapshotProtocol,
   implied: number,
+  impliedP25: number,
+  impliedP75: number,
+  odds: number,
   deposit: number,
   gas: number,
   hours: number,
   posYield: number,
   m: ModelConstants = MODEL,
 ): FarmSize {
-  const slice = m.airdrop_share * implied * (deposit / p.tvl_usd);
-  const fees = m.tx_count * gas;
+  void hours;
+  const sliceAt = (v: number): number => m.airdrop_share * v * (deposit / p.tvl_usd);
+  const slice = sliceAt(implied);
+  const fees = txCountFor(p, m) * gas;
   const forgone = deposit * (m.tbill_rate - posYield) * (m.hold_days / 365);
   const totalCost = fees + forgone;
-  const net = slice - totalCost;
+  const net = odds * slice - totalCost;
+  const netLo = odds * sliceAt(impliedP25) - totalCost;
+  const netHi = odds * sliceAt(impliedP75) - totalCost;
   const breakeven = slice > 0 ? totalCost / slice : Number.POSITIVE_INFINITY;
   return {
     deposit_usd: deposit,
@@ -879,26 +978,29 @@ function priceSize(
     total_cost_usd: round2(totalCost),
     net_usd: round2(net),
     breakeven_odds: breakeven === Number.POSITIVE_INFINITY ? 999 : round4(breakeven),
-    verdict: verdictFor(breakeven, m),
+    verdict: verdictForBand(netLo, net, netHi),
   };
 }
 
-export function farmEconomics(p: SnapshotProtocol, implied: number, age: number | null, steps: FarmStep[], m: ModelConstants = MODEL): FarmPlan {
+export function farmEconomics(p: SnapshotProtocol, implied: number, impliedP25: number, impliedP75: number, odds: number, age: number | null, steps: FarmStep[], m: ModelConstants = MODEL): FarmPlan {
   const gas = gasPerTx(p, m);
   const posYield = positionYieldFor(p, m);
-  // No dilution haircut in radar-4: the slice is conditional on the token
+  // No dilution haircut in radar-5: the slice is conditional on the token
   // launching (10% of implied value, pro-rata by deposit/TVL). The launch
-  // odds are shown per row as context and are never multiplied in — the same
-  // reason MODEL.md §c gives for not multiplying implied value by odds.
-  // radar-3's 90/(age+90) time share cut old protocols' slices up to 21x and
-  // put the model outside the consensus of the field's best boards; it is
-  // removed, not hidden: time_share stays 1 in the data so the change is visible.
+  // odds weight the slice into expected net — they are never multiplied
+  // into implied value, which stays conditional (MODEL.md §c).
+  // radar-4's 15 flat transactions are replaced by the per-action count
+  // (fund + approve on EVM + deposit + claim + withdraw) and the 90-day
+  // hold by 45 days; see txCountFor for why no weekly transaction is
+  // charged. The claim transaction is counted in the costs although it
+  // only happens on a launch — a conservative simplification worth at
+  // most one gas transaction.
   const timeShare = 1;
   const hours = steps.reduce((s, st) => s + st.time_min, 0) / 60;
-  const main = priceSize(p, implied, 1000, gas, hours, posYield, m);
+  const main = priceSize(p, implied, impliedP25, impliedP75, odds, 1000, gas, hours, posYield, m);
   return {
     deposit_usd: 1000,
-    tx_count: m.tx_count,
+    tx_count: txCountFor(p, m),
     gas_usd_per_tx: gas,
     fees_usd: main.fees_usd,
     forgone_usd: main.forgone_usd,
@@ -914,7 +1016,7 @@ export function farmEconomics(p: SnapshotProtocol, implied: number, age: number 
     verdict: main.verdict,
     stop_tvl_usd: Math.round(p.tvl_usd * 0.8),
     exit_tvl_usd: Math.round(p.tvl_usd * 0.5),
-    sizes: FARM_SIZES.map((d) => priceSize(p, implied, d, gas, hours, posYield, m)),
+    sizes: FARM_SIZES.map((d) => priceSize(p, implied, impliedP25, impliedP75, odds, d, gas, hours, posYield, m)),
     steps,
   };
 }
@@ -962,25 +1064,6 @@ function coreAction(bucket: ReturnType<typeof bucketFor>, p: SnapshotProtocol, c
   }
 }
 
-function weeklyAction(bucket: ReturnType<typeof bucketFor>, p: SnapshotProtocol, chain: string): string {
-  const name = p.name;
-  switch (bucket) {
-    case 'vault': return `a deposit, a rebalance or a vote on a ${name} vault`;
-    case 'lending': return `a deposit, a borrow or a repayment on ${name}`;
-    case 'dex': return `adding liquidity or a swap on ${name}`;
-    case 'rwa': return `adding to the position or using the asset in an ${name} flow on ${chain}`;
-    case 'basis': return `a deposit or a rebalance in the ${name} vault`;
-    case 'perp': return `adjusting the hedge or adding margin on ${name}`;
-    case 'restake':
-    case 'staking': return `adding to the stake or claiming rewards through ${name}`;
-    case 'insurance': return `renewing cover or adding a second policy on ${name}`;
-    case 'payments': return `one payment through ${name} on ${chain}`;
-    case 'chain': return `a bridge or a swap on ${chain} through ${name}`;
-    case 'governance': return `a vote or a deposit on ${name}`;
-    default: return `a deposit, a borrow, a swap or a vote`;
-  }
-}
-
 function fmtGrouped(n: number): string {
   return Math.round(n)
     .toString()
@@ -992,10 +1075,15 @@ function fmtMoney(n: number): string {
 }
 
 /**
- * Eight dated farm steps. Costs count 15 on-chain transactions (1 setup +
- * 1 deposit + 12 weekly + 1 exit) at the main chain's gas; the week-6 stop
- * rule names the protocol's own TVL levels. Nothing is claimed about a
- * points program the snapshot does not record.
+ * Eight dated farm steps for a 45-day hold. Costs count only the
+ * transactions the plan certainly needs (see txCountFor): 1 funding + 1
+ * deposit + 1 claim + 1 exit, plus 1 approve on EVM chains — the step
+ * costs below add up to exactly that many gas transactions. The weekly
+ * step is a check, not a transaction: the snapshot records no points
+ * program, so no weekly transaction is charged, and the plan says to act
+ * only if the program's own page requires an on-chain action. The week-4
+ * stop rule names the protocol's own TVL levels. Nothing is claimed about
+ * a points program the snapshot does not record.
  */
 export function planFor(p: SnapshotProtocol, m: ModelConstants = MODEL): FarmStep[] {
   const chain = firstChain(p);
@@ -1003,16 +1091,21 @@ export function planFor(p: SnapshotProtocol, m: ModelConstants = MODEL): FarmSte
   const bucket = bucketFor(p);
   const stop = fmtGrouped(p.tvl_usd * 0.8);
   const tvl = fmtGrouped(p.tvl_usd);
-  const weeklyGas = fmtMoney(12 * gas);
+  const evm = isEVMChain(p);
+  const depositCost = evm ? 1000 + 2 * gas : 1000 + gas;
+  const depositGas = evm ? fmtMoney(2 * gas) : fmtMoney(gas);
+  const depositText = evm
+    ? `Approve USDC for ${p.name} (one transaction), then ${coreAction(bucket, p, chain)}.`
+    : `${capFirst(coreAction(bucket, p, chain))}.`;
   return [
     { text: `Day 0 — Set up a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.`, cost: `${fmtMoney(gas)} of gas for the funding transaction`, time: '5 minutes', cost_usd: gas, time_min: 5 },
-    { text: `Day 0 — ${capFirst(coreAction(bucket, p, chain))}.`, cost: `$1,000 of capital and about ${fmtMoney(gas)} of gas`, time: '15 minutes to set up', cost_usd: 1000 + gas, time_min: 15 },
-    { text: `Weeks 1–12 — Make one qualifying action each week, such as ${weeklyAction(bucket, p, chain)}.`, cost: `about ${weeklyGas} of gas for 12 weekly transactions`, time: '10 minutes a week (2 hours in all)', cost_usd: 12 * gas, time_min: 120 },
-    { text: `Week 6 — Check ${p.name}'s 7-day TVL change: if TVL has closed below $${stop} (80% of $${tvl} at deposit), withdraw half the same day.`, cost: `no fee to check; withdrawing half costs one more transaction, about ${fmtMoney(gas)} of gas`, time: '10 minutes', cost_usd: 0, time_min: 10 },
-    { text: `Day 90 — Open ${p.name}'s own points or rewards page and claim only from the link it publishes; never pay to claim.`, cost: 'no fee to check', time: '15 minutes', cost_usd: 0, time_min: 15 },
-    { text: `Day 90 — Withdraw the $1,000 deposit from ${p.name} on ${chain} unless the week-6 stop rule already exited the position.`, cost: `about ${fmtMoney(gas)} of gas`, time: '10 minutes', cost_usd: gas, time_min: 10 },
-    { text: `Day 90 — Write the wallet, the dates and every transaction hash in a farm log so you can repeat or unwind the position.`, cost: 'nothing but the log', time: '5 minutes', cost_usd: 0, time_min: 5 },
-    { text: `Day 90 — Decide: if no token has launched and TVL is still above $${stop}, either hold for another 90 days or exit; do not add funds without a fresh check.`, cost: 'no fee to decide', time: '10 minutes', cost_usd: 0, time_min: 10 },
+    { text: `Day 0 — ${depositText}`, cost: `$1,000 of capital and about ${depositGas} of gas`, time: '15 minutes to set up', cost_usd: depositCost, time_min: 15 },
+    { text: `Weeks 1–6 — Check ${p.name}'s own points or rewards page once a week and make an on-chain action only if the program requires one; no weekly transaction is charged, because the snapshot records no points program.`, cost: 'no fee to check', time: '10 minutes a week (1 hour in all)', cost_usd: 0, time_min: 60 },
+    { text: `Week 4 — Check ${p.name}'s 7-day TVL change: if TVL has closed below $${stop} (80% of $${tvl} at deposit), withdraw half the same day.`, cost: `no fee to check; withdrawing half costs one more transaction, about ${fmtMoney(gas)} of gas`, time: '10 minutes', cost_usd: 0, time_min: 10 },
+    { text: `Day 45 — Open ${p.name}'s own points or rewards page and claim only from the link it publishes; never pay to claim.`, cost: `about ${fmtMoney(gas)} of gas for the claim transaction`, time: '15 minutes', cost_usd: gas, time_min: 15 },
+    { text: `Day 45 — Withdraw the $1,000 deposit from ${p.name} on ${chain} unless the week-4 stop rule already exited the position.`, cost: `about ${fmtMoney(gas)} of gas`, time: '10 minutes', cost_usd: gas, time_min: 10 },
+    { text: `Day 45 — Write the wallet, the dates and every transaction hash in a farm log so you can repeat or unwind the position.`, cost: 'nothing but the log', time: '5 minutes', cost_usd: 0, time_min: 5 },
+    { text: `Day 45 — Decide: if no token has launched and TVL is still above $${stop}, either hold for another 45 days or exit; do not add funds without a fresh check.`, cost: 'no fee to decide', time: '10 minutes', cost_usd: 0, time_min: 10 },
   ];
 }
 
@@ -1052,7 +1145,7 @@ function bootstrapRankRanges(
     const fit = fitModel(train, FINAL_OPTIONS, m);
     const scored = candidates.map((p) => ({
       slug: p.slug,
-      v: predictValue(fit, p, snapshot.as_of, FINAL_OPTIONS, launchOdds(snapshot, snapshot.as_of, p), m),
+      v: predictValue(fit, p, snapshot.as_of, FINAL_OPTIONS, launchOdds(snapshot, snapshot.as_of, p), m) * siblingMultiplier(snapshot, p),
     }));
     scored.sort((a, b) => b.v - a.v || (a.slug < b.slug ? -1 : 1));
     for (let i = 0; i < scored.length; i++) candRanks.get(scored[i]!.slug)!.push(i + 1);
@@ -1129,12 +1222,13 @@ function buildBoardInternal(
   const rankRanges = bootstrapRankRanges(candidates, peers, snapshot, model);
   const scored = candidates.map((p) => {
     const age = ageDays(snapshot.as_of, p.listed_at);
-    const implied = predictValue(fit, p, snapshot.as_of, FINAL_OPTIONS, launchOdds(snapshot, snapshot.as_of, p), model);
+    const sib = siblingMultiplier(snapshot, p);
+    const rawImplied = predictValue(fit, p, snapshot.as_of, FINAL_OPTIONS, launchOdds(snapshot, snapshot.as_of, p), model);
+    const implied = Math.max(1, Math.round(rawImplied * sib));
     const sizeCurve = sizeCurveValue(fit, p, model);
     const offset = fit.offsets.get(p.category ?? '(null)') ?? 0;
     const growthMult = 10 ** (model.growth_weight_log10 * (clamp(numOr(p.change_7d, 0), model.growth_floor, model.growth_cap) / 100));
     const steps = planFor(p, model);
-    const farm = farmEconomics(p, implied, age, steps, model);
     const range = rankRanges.get(p.slug)!;
     const band = {
       p10: Math.max(1, Math.round(implied * 10 ** quantiles.p10)),
@@ -1144,10 +1238,11 @@ function buildBoardInternal(
       rankLo: range.rankLo,
       rankHi: range.rankHi,
     };
-    return { p, age, implied, sizeCurve, offset, growthMult, steps, farm, band };
+    const farm = farmEconomics(p, implied, band.p25, band.p75, launchOdds(snapshot, snapshot.as_of, p), age, steps, model);
+    return { p, age, implied, sizeCurve, offset, growthMult, sib, steps, farm, band };
   });
   scored.sort((a, b) => b.implied - a.implied || slugOrder(a.p, b.p));
-  const board = scored.map(({ p, age, implied, sizeCurve, offset, growthMult, steps, farm, band }, i) => ({
+  const board = scored.map(({ p, age, implied, sizeCurve, offset, growthMult, sib, steps, farm, band }, i) => ({
     rank: i + 1,
     rank_lo: band.rankLo,
     rank_hi: band.rankHi,
@@ -1177,6 +1272,7 @@ function buildBoardInternal(
       category_offset_log10: offset,
       category_multiplier: 10 ** offset,
       growth_multiplier: growthMult,
+      sibling_multiplier: sib,
       age_days: age,
     },
     farm,
@@ -1228,6 +1324,7 @@ function slim(row: BoardRow): RadarRow {
     category_offset_log10: row.model.category_offset_log10,
     category_multiplier: row.model.category_multiplier,
     growth_multiplier: row.model.growth_multiplier,
+    sibling_multiplier: row.model.sibling_multiplier,
     farm: row.farm,
     nearest_comps: row.nearest_comps,
   };

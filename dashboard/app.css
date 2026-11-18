@@ -36,7 +36,7 @@ td.num,th.num{text-align:right}.sub{color:var(--mut);font-size:12px}
 .name b{display:block;font-weight:600}.name span{color:var(--mut);font-size:12px}
 .band{font-size:11.5px;color:var(--mut);font-family:var(--fn);white-space:nowrap}
 .v{font-family:var(--fn);font-size:11.5px;font-weight:700;padding:2px 7px;border-radius:20px;white-space:nowrap}
-.v-FARM{background:var(--gds);color:var(--gd)}.v-THIN{background:var(--ams);color:var(--am)}.v-SKIP{background:var(--bds);color:var(--bd)}
+.v-ROBUST{background:var(--gd);color:#fff}.v-FARM{background:var(--gds);color:var(--gd)}.v-THIN{background:var(--ams);color:var(--am)}.v-SKIP{background:var(--bds);color:var(--bd)}
 .controls{display:flex;flex-wrap:wrap;align-items:end;gap:10px;padding:12px 0}
 .field{display:grid;gap:3px}.field>label,.field>span{color:var(--mut);font-size:12px}
 .field input,.field select{min-height:36px;padding:0 10px;border:1px solid var(--ln);border-radius:var(--r);background:var(--sf);min-width:150px}
