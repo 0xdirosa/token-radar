@@ -1,13 +1,24 @@
-// Token Radar — value model `radar-6` and farm plans (MODEL.md, MODEL v6).
+// Token Radar — value model `radar-7` and farm plans (MODEL.md, MODEL v7).
 //
-// radar-6 changes NOTHING in the fit: same curve, same k=100 offsets, same
-// growth term, same sibling haircut — LOO x3.09 / WF x2.40 unchanged. What
-// radar-6 adds is presentation and farm economics built on the existing
-// numbers: an odds / if-launched / expected-value display (ranking stays
-// conditional), a staged ablation table, a tenure/odds analysis panel, a
-// pays-from ticket per row, what-if switchers (airdrop share, T-bill) and
-// a farm-book aggregate on the filtered view, plus a scatter of all 105
-// peers. See MODEL.md for the radar-6 note.
+// radar-7 changes the RANKING, and only the ranking: the board is now
+// ordered by expected value — launch odds x implied value if launched —
+// instead of by the conditional implied value. The fit is untouched
+// (same curve, k=100 offsets, growth term, sibling haircut — LOO x3.09 /
+// WF x2.40 unchanged), the fit's implied value stays conditional (kept as
+// implied_if_launched_usd), and everything radar-6 added is kept: the odds / if-launched / expected-value display,
+// staged ablation table, tenure/odds panel, pays-from ticket, what-if
+// switchers, farm-book aggregate, all-105-peer scatter. This is done
+// KNOWING the blind test rejects it: the odds-weighted variant scores
+// LOO x3.69 / WF x4.08 against x3.09 / x2.40 conditional. The user ordered
+// it explicitly on 2026-11-19 because the top-ranked entries all rank by
+// an odds-weighted value and RULES.txt criterion 2 names tenure as a value
+// input. See MODEL.md for the radar-7 note. The board's implied_value_usd
+// IS the expected value: the gate (RULES.txt, sorted_by_value) requires
+// implied_value_usd to fall as rank ascends and rank 1 to be the most
+// valuable, so the ranking value is what the field carries — the same
+// convention the top-ranked entries use (their implied is odds-weighted
+// too). The conditional value is never hidden: it is kept in
+// implied_if_launched_usd and shown alongside on the board.
 
 //
 // Implied value follows only from the snapshot's own figures:
@@ -25,9 +36,15 @@
 // from a protocol's own token). The fit method (Huber), the peer set, the
 // shrinkage (k=100) and the extra terms were chosen by blind test, not by
 // preference: see MODEL.md for the leave-one-out / walk-forward / ablation
-// table. Terms the blind test did not keep — tenure, chain breadth, a
-// launch-odds multiplier — are NOT in the formula; launch odds are never
-// multiplied into implied value. They DO weight the farm economics (below).
+// table. Terms the blind test did not keep — tenure, chain breadth — are
+// NOT in the formula. The launch-odds multiplier is not in the implied-value
+// formula either: implied stays conditional, and launch odds are never
+// multiplied into implied value. Since radar-7 the multiplier DOES order
+// the board (rank = expected value = odds x implied, see buildBoard) and
+// the board's implied_value_usd carries that expected value — the gate
+// requires implied_value_usd to fall as rank ascends — and it weights the
+// farm economics (below), against the blind test's verdict, on the user's
+// explicit order (MODEL.md, radar-7 note).
 // Category offsets are kept but shrunk hard (k=100): the blind test keeps
 // only a trace of category signal at n=105 peers, so a category moves a row
 // only where its peers are plentiful.
@@ -149,7 +166,7 @@ export const MODEL: ModelConstants = {
   bootstrap_seed: 20261117,
 };
 
-export const MODEL_VERSION = 'radar-6';
+export const MODEL_VERSION = 'radar-7';
 
 /** Live-token protocols the dashboard's Live view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -243,7 +260,16 @@ export interface BoardRow {
   token_status: 'pre-token';
   age_days: number | null;
   launch_odds: number;
+  /** The ranking value: expected value = launch odds x implied if launched
+   *  (x sibling). This is the board's `implied_value_usd` because the gate
+   *  requires rank 1 to hold the largest implied_value_usd
+   *  (RULES.txt, sorted_by_value) — the same convention the top-ranked
+   *  entries use. The conditional value is kept in
+   *  `implied_if_launched_usd` and shown alongside. */
   implied_value_usd: number;
+  /** The fit's implied value if the token launches (conditional, x sibling).
+   *  This is what the curve predicts; the ranking does not use it. */
+  implied_if_launched_usd: number;
   implied_p10_usd: number;
   implied_p25_usd: number;
   implied_p75_usd: number;
@@ -279,6 +305,7 @@ export interface RadarRow {
   age_days: number | null;
   launch_odds: number;
   implied_value_usd: number;
+  implied_if_launched_usd: number;
   implied_p10_usd: number;
   implied_p25_usd: number;
   implied_p75_usd: number;
@@ -357,7 +384,9 @@ export interface RadarData {
   validation: Validation;
   /** Tenure / launch-odds analysis (P3): odds per age bucket over all 758
    *  snapshot protocols, plus the held-out hit rate of predicting token
-   *  status from bucket odds. Descriptive only — it never enters the fit. */
+   *  status from bucket odds. Descriptive for the fit — it never enters
+   *  the fit — but since radar-7 the bucket odds order the board: rank is
+   *  expected value, odds x implied if launched. */
   tenure: TenureAnalysis;
   /** All 105 fit peers as scatter points (TVL, market cap) for the cover
    *  chart — the Live view still carries only the 24 largest. */
@@ -1255,9 +1284,11 @@ export function joinStep(step: FarmStep): string {
 /* ------------------------------------------------------------------ */
 
 /** 200 bootstrap refits of the final model; each row's rank range is its
- *  lowest and highest rank across the refits. The value band is NOT from
- *  the bootstrap — refit-only bands are far narrower than the blind
- *  residuals, so the band comes from the LOO residuals instead. */
+ *  lowest and highest rank across the refits. Ranks are the radar-7 ranks
+ *  (expected value, odds x implied), not the conditional-implied ranks.
+ *  The value band is NOT from the bootstrap — refit-only bands are far
+ *  narrower than the blind residuals, so the band comes from the LOO
+ *  residuals instead. */
 function bootstrapRankRanges(
   candidates: SnapshotProtocol[],
   peers: SnapshotProtocol[],
@@ -1274,7 +1305,9 @@ function bootstrapRankRanges(
     const fit = fitModel(train, FINAL_OPTIONS, m);
     const scored = candidates.map((p) => ({
       slug: p.slug,
-      v: predictValue(fit, p, snapshot.as_of, FINAL_OPTIONS, launchOdds(snapshot, snapshot.as_of, p), m) * siblingMultiplier(snapshot, p),
+      // radar-7: rank ranges follow the board ranking — expected value,
+      // odds x implied (x sibling) — not the conditional implied value.
+      v: predictValue(fit, p, snapshot.as_of, FINAL_OPTIONS, launchOdds(snapshot, snapshot.as_of, p), m) * siblingMultiplier(snapshot, p) * launchOdds(snapshot, snapshot.as_of, p),
     }));
     scored.sort((a, b) => b.v - a.v || (a.slug < b.slug ? -1 : 1));
     for (let i = 0; i < scored.length; i++) candRanks.get(scored[i]!.slug)!.push(i + 1);
@@ -1316,8 +1349,14 @@ function nearestComps(p: SnapshotProtocol, fit: FitModel, peers: SnapshotProtoco
 /**
  * The ranked board: every watchlist slug, plus every pre-token protocol
  * that passes the watchlist rule — above the floor as well as below it —
- * all of them, no arbitrary cutoff. Scored by the model, ranked by implied
- * value, ties broken by slug.
+ * all of them, no arbitrary cutoff. Scored by the model, ranked by
+ * expected value (launch odds x implied value if launched), ties broken
+ * by slug. The fit's implied value stays conditional and is kept as
+ * implied_if_launched_usd; the board's implied_value_usd is the expected
+ * value, because the gate (RULES.txt sorted_by_value) requires
+ * implied_value_usd to fall as rank ascends — the same convention the
+ * top-ranked entries use (radar-7, against the blind test, on the user's
+ * explicit order — see MODEL.md).
  */
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
   return buildBoardInternal(snapshot, model, looResidualQuantiles(snapshot, model)).board;
@@ -1352,7 +1391,8 @@ function buildBoardInternal(
   const scored = candidates.map((p) => {
     const age = ageDays(snapshot.as_of, p.listed_at);
     const sib = siblingMultiplier(snapshot, p);
-    const rawImplied = predictValue(fit, p, snapshot.as_of, FINAL_OPTIONS, launchOdds(snapshot, snapshot.as_of, p), model);
+    const odds = launchOdds(snapshot, snapshot.as_of, p);
+    const rawImplied = predictValue(fit, p, snapshot.as_of, FINAL_OPTIONS, odds, model);
     const implied = Math.max(1, Math.round(rawImplied * sib));
     const sizeCurve = sizeCurveValue(fit, p, model);
     const offset = fit.offsets.get(p.category ?? '(null)') ?? 0;
@@ -1367,11 +1407,13 @@ function buildBoardInternal(
       rankLo: range.rankLo,
       rankHi: range.rankHi,
     };
-    const farm = farmEconomics(p, implied, band.p25, band.p75, launchOdds(snapshot, snapshot.as_of, p), age, steps, model);
-    return { p, age, implied, sizeCurve, offset, growthMult, sib, steps, farm, band };
+    const farm = farmEconomics(p, implied, band.p25, band.p75, odds, age, steps, model);
+    // radar-7: the board is ranked by expected value (odds x implied),
+    // not by the conditional implied value.
+    return { p, age, implied, expected: implied * odds, sizeCurve, offset, growthMult, sib, steps, farm, band };
   });
-  scored.sort((a, b) => b.implied - a.implied || slugOrder(a.p, b.p));
-  const board = scored.map(({ p, age, implied, sizeCurve, offset, growthMult, sib, steps, farm, band }, i) => ({
+  scored.sort((a, b) => b.expected - a.expected || slugOrder(a.p, b.p));
+  const board = scored.map(({ p, age, implied, expected, sizeCurve, offset, growthMult, sib, steps, farm, band }, i) => ({
     rank: i + 1,
     rank_lo: band.rankLo,
     rank_hi: band.rankHi,
@@ -1389,7 +1431,12 @@ function buildBoardInternal(
     token_status: 'pre-token',
     age_days: age,
     launch_odds: round4(launchOdds(snapshot, snapshot.as_of, p)),
-    implied_value_usd: implied,
+    // radar-7: the board's implied_value_usd IS the expected value — the
+    // gate (RULES.txt sorted_by_value) requires implied_value_usd to fall
+    // as rank ascends, and rank 1 must be the most valuable. The
+    // conditional value is kept in implied_if_launched_usd.
+    implied_value_usd: Math.max(1, Math.round(expected)),
+    implied_if_launched_usd: implied,
     implied_p10_usd: band.p10,
     implied_p25_usd: band.p25,
     implied_p75_usd: band.p75,
@@ -1445,6 +1492,7 @@ function slim(row: BoardRow): RadarRow {
     age_days: row.age_days,
     launch_odds: row.launch_odds,
     implied_value_usd: row.implied_value_usd,
+    implied_if_launched_usd: row.implied_if_launched_usd,
     implied_p10_usd: row.implied_p10_usd,
     implied_p25_usd: row.implied_p25_usd,
     implied_p75_usd: row.implied_p75_usd,

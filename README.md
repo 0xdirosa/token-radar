@@ -6,7 +6,7 @@
 
 A token launch radar for [make.fun's token-radar-01 bounty](https://make.fun/bounty/token-radar-01): it reads a sealed snapshot of every protocol DefiLlama tracks, ranks the protocols that record no token yet by what their launch would be worth, and shows a reader how to farm each one.
 
-The board covers the whole 40-protocol watchlist (every protocol with at least $50M of TVL and no token on record) plus 138 early pre-token protocols below that floor that pass the watchlist's own rule, 178 rows in all. Implied value follows from the snapshot's own figures — TVL, the peer market-cap-per-$1-TVL multiple of the protocol's category, seven-day growth, age with no token, and chain reach — never from a hand-kept list of names. Live-token protocols are set aside in their own view with their market caps shown, not mixed into the ranking. Every row carries a six-step farm plan with what each step costs and how long it takes.
+The board covers the whole 40-protocol watchlist (every protocol with at least $50M of TVL and no token on record) plus 138 early pre-token protocols below that floor that pass the watchlist's own rule, 198 rows in all. Implied value follows from the snapshot's own figures — TVL, the peer market-cap-per-$1-TVL multiple of the protocol's category, seven-day growth, age with no token, and chain reach — never from a hand-kept list of names. Live-token protocols are set aside in their own view with their market caps shown, not mixed into the ranking. Every row carries a six-step farm plan with what each step costs and how long it takes.
 
 ## Run
 

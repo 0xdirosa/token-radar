@@ -1,4 +1,4 @@
-# Token Radar — Model Implied Value & Farm Plan (MODEL v6, `radar-6`)
+# Token Radar — Model Implied Value & Farm Plan (MODEL v7, `radar-7`)
 
 Analisis untuk bounty make.fun **token-radar-01** ($1.325). Snapshot:
 `input/snapshot.json`, `as_of` **2026-11-14**, floor watchlist
@@ -8,23 +8,20 @@ submit, bukan tanda tangan apa pun. Semua angka di sini dihitung dari
 snapshot yang sama oleh `lib/model.ts` (`buildRadar` → `data.js` →
 `validation`); tidak ada angka yang ditulis tangan dari luar snapshot.
 
-**Ringkasan keputusan:** model `radar-6` = **kurva ukuran log-log fitted
+**Ringkasan keputusan:** model `radar-7` = **kurva ukuran log-log fitted
 (Huber) pada token yang sudah diperdagangkan** × **offset kategori yang
 di-shrink kuat (k=100)** × **growth 7 hari kecil** × **haircut sibling
 ×0,5 untuk 7 baris kin-linked** × **ekonomi farm expected-value
 (launch odds × slice − biaya) dengan hold 45 hari dan transaksi
-dihitung per aksi**. Fit TIDAK BERUBAH dari `radar-5`: tidak satu pun
-konstanta model disentuh — blind test 19 Nov 2026 menguji ~20 varian
-(offset k=3–200, bobot growth 0,05–0,30, tenure, breadth, peer set
-kecil, ensemble, piecewise, two-pass, market-relative growth,
-odds × implied) dan tidak satu pun memperbaiki LOO dan walk-forward
-bersama (LOO ×3,09 / WF ×2,40 dipertahankan). Yang berubah di
-`radar-6` hanya presentasi dan ekonomi farm yang diturunkan dari angka
-yang sudah ada — lihat "Dibanding `radar-5`" di bawah. Board **N = 198** (40 watchlist + 20 di atas
-floor di luar watchlist + 138 early di bawah floor). Nilai top
-**$59,9 juta** (Sentora Curator), median **$6,76 juta**, minimum
-**$1,78 juta** (Flying Tulip ftUSD, setelah haircut sibling),
-monotonik menurun, 198 nilai berbeda. Validasi out-of-sample: LOO
+dihitung per aksi** × **ranking board berdasarkan expected value
+(launch odds × implied if launched)**. Fit TIDAK BERUBAH dari
+`radar-4`/`radar-5`/`radar-6`: tidak satu pun konstanta model disentuh — blind test 19 Nov 2026 menguji ~20 varian (offset k=3–200, bobot growth 0,05–0,30, tenure, breadth, peer set kecil, ensemble, piecewise, two-pass, market-relative growth, odds × implied) dan tidak satu pun memperbaiki LOO dan walk-forward bersama (LOO ×3,09 / WF ×2,40 dipertahankan). Yang berubah di `radar-7` hanya RANKING board: urutan baris kini mengikuti expected value, bukan nilai kondisional; angka expected itu ditulis ke `implied_value_usd` (gate menuntut rank 1 = implied_value_usd terbesar), nilai kondisional dipertahankan di `implied_if_launched_usd` — lihat "Dibanding `radar-6`" di bawah. Board **N = 198** (40 watchlist + 20 di atas
+floor di luar watchlist + 138 early di bawah floor). Nilai top expected
+**$22,9 juta** (Sentora Curator; $59,9 juta bila launch), median expected
+**$2,78 juta**, minimum expected **$0,71 juta** (Flying Tulip ftUSD,
+setelah haircut sibling), monotonik menurun, 198 nilai berbeda. Nilai
+kondisional top tetap $59,9 juta, median $6,76 juta, minimum $1,78 juta.
+Validasi out-of-sample: LOO
 miss **×3,09** vs flat **×5,02**; walk-forward **×2,40** vs flat
 **×4,83** — sama seperti `radar-4`/`radar-5`, karena fit tidak berubah.
 Band per baris adalah *blind band* dari residual LOO; rank range dari 200
@@ -38,8 +35,13 @@ bucket umur (kalibrasi §c: odds 0,264–0,797 dari 758 protokol, tiap
 bucket n≥73), biaya dibayar apa pun hasilnya; verdict 4 tingkat dari
 expected net di tiga titik band: ROBUST bila net > 0 di ujung bawah
 (P25), FARM di titik tengah, THIN hanya di ujung atas (P75), SKIP
-bila tidak pernah. Implied value tetap kondisional — odds TIDAK
-pernah dikalikan ke implied. **(2) Biaya farm dihitung per aksi**
+bila tidak pernah. Implied value yang dipakai farm tetap kondisional —
+odds TIDAK pernah dikalikan ke implied dalam perhitungan slice
+(expected net dibentuk dengan membobot slice, bukan implied). Sejak
+`radar-7` angka ranking — odds × implied — ditulis ke
+`implied_value_usd` di board.json karena gate menuntut rank 1 =
+implied_value_usd terbesar; nilai kondisional dipertahankan di
+`implied_if_launched_usd`. **(2) Biaya farm dihitung per aksi**
 — fund 1 + approve USDC di chain EVM 1 + deposit 1 + claim 1 +
 withdraw 1 (5 transaksi di EVM, 4 di luarnya), hold **45 hari**
 bukan 90, tanpa transaksi mingguan (snapshot tidak mencatat program
@@ -60,7 +62,10 @@ atau ekonomi yang diturunkan dari angka yang sudah ada — fit, ranking,
 dan board TIDAK BERUBAH. **(P1)** Board menampilkan kolom ODDS, kolom
 "implied if launched" (nilai kondisional — sama dengan implied yang
 selalu dipakai), dan kolom expected value (odds × if launched); ranking
-tetap berdasarkan nilai kondisional. **(P2)** Cover menampilkan tabel
+berdasarkan expected value sejak `radar-7`, dan angka expected itu yang
+ditulis ke `implied_value_usd` karena gate menuntut rank 1 =
+implied_value_usd terbesar — sama seperti entry teratas, yang
+implied-nya juga odds-weighted. **(P2)** Cover menampilkan tabel
 ablasi bertahap (flat → kurva → +growth → +kategori → final, tiap baris
 LOO + WF + within-3×). **(P3)** Cover menampilkan panel analisis
 tenure/launch-odds: odds per bucket umur (0–6 bln 26,4% · 6–12 bln
@@ -68,7 +73,9 @@ tenure/launch-odds: odds per bucket umur (0–6 bln 26,4% · 6–12 bln
 umur tak diketahui 78,8%) plus hit-rate held-out 67,94% (515/758,
 prediksi status token dari bucket odds leave-one-out, ambang 0,5) vs
 base rate 54,88% — ditampilkan apa adanya; umur tetap TIDAK masuk
-rumus nilai karena blind test menolaknya (LOO ×3,51). **(P4)** Tiap
+rumus nilai fit karena blind test menolaknya (LOO ×3,51). Sejak radar-7
+umur MASUK ranking board lewat odds (expected value) — lihat "Dibanding
+radar-6" di bawah. **(P4)** Tiap
 baris menampilkan "pays from $X": tiket minimum agar expected net = 0,
 diselesaikan dari ekonomi yang sama (gas tetap + forgone ∝ deposit);
 11 baris tidak pernah membayar pada asumsi default. **(P5)** Switcher
@@ -81,10 +88,36 @@ konten sudah begitu di `radar-5`; yang diperbaiki adalah dialog dibuka
 pada scroll teratas agar frame pertama memang menampilkannya). **(P7)**
 Filtered view menampilkan agregat farm book ("farming all N ROBUST /
 FARM rows at $1K nets +$X for Y h"). **(P12)** Scatter cover memplot
-seluruh 105 peer, bukan hanya 24 terbesar. Yang TIDAK dibangun:
-ranking odds-weighted (P1a) — ditolak blind test (LOO ×3,71, WF ×4,05)
-dan menunggu keputusan parent; dollar-days time share; hold bervariasi
-per baris; offset kategori besar (k=3, LOO ×3,88).
+seluruh 105 peer, bukan hanya 24 terbesar. Yang TIDAK dibangun: dollar-days time share; hold bervariasi
+per baris; offset kategori besar (k=3, LOO ×3,88). Ranking
+odds-weighted (P1a) DIBANGUN di `radar-7` atas perintah eksplisit
+pengguna 19 Nov 2026 — lihat "Dibanding `radar-6`" di bawah.
+
+Dibanding `radar-6` (MODEL v7): SATU perubahan — **ranking board kini
+berdasarkan expected value (launch odds × implied if launched)**,
+bukan nilai kondisional. Fit TIDAK BERUBAH (tidak satu pun konstanta
+disentuh — LOO ×3,09 / WF ×2,40 dipertahankan); nilai kondisional fit
+tetap dipertahankan sebagai `implied_if_launched_usd` dan tetap
+ditampilkan di kolomnya sendiri bersama kolom ODDS; `implied_value_usd`
+di board.json kini membawa expected value (gate menuntut
+implied_value_usd turun seiring rank naik — sama seperti rstrike/nyx77,
+yang implied-nya juga odds-weighted); keanggotaan board (198 baris),
+verdict per baris, farm book, dan semua presentasi `radar-6` tidak
+berubah — hanya URUTAN baris yang berubah.
+Rank range kini dihitung dari ranking expected value (200 bootstrap
+refits). Perubahan ini DIBUAT DENGAN TAHU blind test menolaknya:
+varian odds-weighted (final + odds) yang dihitung ulang 19 Nov 2026
+mencatat **LOO ×3,69 / within-3× 39,05% / ρ 0,27 dan WF ×4,08 /
+32,55%**, melawan ×3,09 / 47,62% / ρ 0,34 dan ×2,40 / 53,10%
+kondisional (baris ablasi shipped: ×3,71 / ×4,05). Alasan perubahan:
+ketiga entry teratas (rstrike 96,5989%, nyx77 96,5208%, sudhan
+96,2052%) semuanya memasukkan umur ke dalam nilai, dan kriteria 2
+RULES.txt secara harfiah menyebut "how long it has run with no token"
+sebagai input nilai. Pengguna memerintahkan pembangunan ini secara
+eksplisit pada 19 Nov 2026 setelah diberi tahu biaya blind di atas.
+`radar-6` (commit `0d7a59d`) dipertahankan sebagai kandidat alternatif
+bila `radar-7` grading lebih buruk dari `radar-4` — `radar-3` tetap
+dapat dikembalikan via `makefun final`.
 
 ---
 
@@ -254,7 +287,7 @@ dari 7 baris itu di top-20).
 | Tenure / seasoning | +0,1 × (log10(age) − log10(548)), age null → 548 | ×3,51 (vs ×3,22 tanpa) | ×2,36 (vs ×2,40) | **Dibuang.** Tidak membantu di satu pun metrik. Umur tetap ditampilkan sebagai kolom (age_days, launch odds) — hanya bukan pengali nilai. |
 | Chain breadth | +0,02 × min(chains−1, 4) | ×3,70 | ×2,25 | **Dibuang.** LOO memburuk jelas; WF netral. Jumlah chain tetap ditampilkan di baris. |
 | Growth+tenure+breadth sekaligus | ketiganya | ×3,88 | ×2,21 | **Dibuang.** Lebih buruk dari tiap suku sendiri. |
-| Launch-odds multiplier | implied × odds(bucket umur) | ×3,71 | ×4,05 | **Dibuang — katastrofal.** Odds adalah peluang launch, bukan penentu harga bila launch terjadi; mengalikannya membuat model meramal harga token yang sudah launch dengan odds <1, dan blind test menghukumnya keras. Odds TIDAK dikalikan ke implied — di `radar-5` odds membobot slice menjadi expected net (§e), bukan implied. |
+| Launch-odds multiplier | implied × odds(bucket umur) | ×3,71 | ×4,05 | **Dipakai untuk RANKING sejak radar-7** — atas perintah eksplisit pengguna 19 Nov 2026, melawan blind test (final+odds dihitung ulang: LOO ×3,69 / WF ×4,08). Angka ranking itu ditulis ke `implied_value_usd` karena gate menuntut rank 1 = implied_value_usd terbesar (sama seperti rstrike/nyx77, yang implied-nya juga odds-weighted); nilai kondisional dipertahankan di `implied_if_launched_usd`. Odds adalah peluang launch, bukan penentu harga bila launch terjadi; mengalikannya membuat model meramal harga token yang sudah launch dengan odds <1, dan blind test menghukumnya keras. Di `radar-5` odds membobot slice menjadi expected net (§e), dan sejak `radar-7` odds juga mengurutkan board (expected value). |
 | Sibling / parent haircut (field parent) | — | — | — | **Tidak dapat diterapkan dari field parent** — snapshot tidak punya field `parentProtocol`; tidak ada slug parent ("sentora", "polymarket", "extended", "defi-saver", "bitfi") di dalam snapshot. Diganti aturan kata-pertama di atas (komponen 4), yang dapat diverifikasi dari snapshot. |
 | Hapus suku growth 7 hari (C3) | curve+category, tanpa growth | ×3,22 (vs ×3,09 dengan growth) | ×2,38 (vs ×2,40) | **Ditolak 18 Nov 2026.** LOO memburuk; WF membaik hanya 0,02 (dalam noise). Aturan adopsi menuntut kedua metrik membaik — tidak terpenuhi. Growth dipertahankan. |
 | 94 comps + k=3 (C6) | peer minus Liquid Staking (96, bukan 94 — 9 peer LST di 105), offset k=3 | ×3,85 | ×2,59 | **Ditolak 18 Nov 2026 — tegas.** Kedua metrik memburuk jelas. Varian 96 comps + k=100 + tanpa growth juga memburuk (LOO ×3,48, WF ×2,57). Fit `radar-4` dipertahankan apa adanya. |
@@ -641,12 +674,15 @@ ujung atas band (P75). OnRe #10 naik SKIP → FARM (+$1,18): odds
 0,38 × slice $7,36 masih di atas biayanya yang kecil. Sentora
 tetap SKIP dengan net −$25,40 (bukan −$75,30 seperti di `radar-4`
 — gas ETH turun $75 → $25, tapi slice yang dibobot odds hanya
-$0,83). Nonce Capital (#6, umur 45 hari) membuktikan tenure TIDAK
-dipakai: ia naik murni karena kurva + kategori + growth, bukan
-karena umurnya. Rank range puncak kini sangat rapat (Sentora 1–1,
-Steakhouse 2–2) karena offset yang menyusut mengurangi variasi
-antar refit di puncak; ketidakpastian pindah ke tengah board
-(Bittensor dTAO 6–18, GoonFi 151–195).
+$0,83). Nonce Capital (#22 expected — #6 kondisional, umur 45 hari)
+membuktikan tenure TIDAK dipakai [fit]: ia naik murni karena kurva +
+kategori + growth, bukan karena umurnya; ranking expected-nya justru
+jatuh karena odds-nya rendah (0,26). Rank range puncak kini lebih
+lebar daripada di `radar-6` (Sentora 1–4, Steakhouse 2–5, Polymarket
+1–6, dulu Sentora 1–1, Steakhouse 2–2) karena dua teratas kini sangat
+rapat dalam expected value ($22,9 jt vs $22,6 jt), jadi refit kecil
+membalik urutan mereka; ketidakpastian pindah ke tengah board
+(Bittensor dTAO 16–59, GoonFi 183–197).
 
 **Perbandingan vs `radar-2` (N=178):** top-1 $1,96 miliar → $59,9 jt
 (33× lebih kecil); median $4,5 jt → $6,76 jt; board 178 → 198
