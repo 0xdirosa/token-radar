@@ -1,4 +1,14 @@
-// Token Radar — value model `radar-5` and farm plans (MODEL.md, MODEL v5).
+// Token Radar — value model `radar-6` and farm plans (MODEL.md, MODEL v6).
+//
+// radar-6 changes NOTHING in the fit: same curve, same k=100 offsets, same
+// growth term, same sibling haircut — LOO x3.09 / WF x2.40 unchanged. What
+// radar-6 adds is presentation and farm economics built on the existing
+// numbers: an odds / if-launched / expected-value display (ranking stays
+// conditional), a staged ablation table, a tenure/odds analysis panel, a
+// pays-from ticket per row, what-if switchers (airdrop share, T-bill) and
+// a farm-book aggregate on the filtered view, plus a scatter of all 105
+// peers. See MODEL.md for the radar-6 note.
+
 //
 // Implied value follows only from the snapshot's own figures:
 //
@@ -139,7 +149,7 @@ export const MODEL: ModelConstants = {
   bootstrap_seed: 20261117,
 };
 
-export const MODEL_VERSION = 'radar-5';
+export const MODEL_VERSION = 'radar-6';
 
 /** Live-token protocols the dashboard's Live view carries, by market cap. */
 export const LIVE_ROWS = 24;
@@ -183,7 +193,7 @@ export interface FarmPlan {
   position_yield_rate: number;
   total_cost_usd: number;
   hours: number;
-  /** Always 1 in radar-5: no dilution haircut (see farmEconomics). Kept so the
+  /** Always 1 in radar-6: no dilution haircut (see farmEconomics). Kept so the
    *  dashboard's data contract and the board's history stay comparable. */
   time_share: number;
   /** Slice if the token launches (conditional, not expected value). */
@@ -191,6 +201,12 @@ export interface FarmPlan {
   /** Expected net: P(launch) x slice - costs, at the point implied value. */
   net_usd: number;
   breakeven_odds: number;
+  /** Smallest ticket (USD) whose expected net is exactly zero: fees /
+   *  (odds x slice-per-dollar - net forgone rate). Null when the row never
+   *  pays: the forgone yield alone outruns the expected slice per dollar,
+   *  so no ticket size clears costs. Solved from the same economics as the
+   *  verdicts — gas is fixed, forgone yield scales with the deposit. */
+  pays_from_usd: number | null;
   net_per_hour_usd: number;
   verdict: 'ROBUST' | 'FARM' | 'THIN' | 'SKIP';
   stop_tvl_usd: number;
@@ -306,9 +322,29 @@ export interface Validation {
     mean_spearman: number;
   };
   flat: { loo: ValidationMetric; walk_forward_mean_median_miss_x: number; walk_forward_mean_within_3x_pct: number };
-  methods: { method: string; variant: string; loo_median_miss_x: number; loo_within_3x_pct: number; loo_spearman: number; wf_mean_miss_x: number }[];
-  ablation: { variant: string; loo_median_miss_x: number; loo_within_3x_pct: number; loo_spearman: number; wf_mean_miss_x: number }[];
+  methods: { method: string; variant: string; loo_median_miss_x: number; loo_within_3x_pct: number; loo_spearman: number; wf_mean_miss_x: number; wf_mean_within_3x_pct: number }[];
+  ablation: { variant: string; loo_median_miss_x: number; loo_within_3x_pct: number; loo_spearman: number; wf_mean_miss_x: number; wf_mean_within_3x_pct: number }[];
   bands: { method: string; refits: number; n: number; p25_75_coverage_pct: number; p10_90_coverage_pct: number };
+}
+
+export interface TenureBucket {
+  label: string;
+  min_days: number | null;
+  max_days: number | null;
+  n: number;
+  token: number;
+  odds: number;
+}
+
+export interface TenureAnalysis {
+  buckets: TenureBucket[];
+  held_out: {
+    n: number;
+    correct: number;
+    accuracy_pct: number;
+    base_rate_pct: number;
+    rule: string;
+  };
 }
 
 export interface RadarData {
@@ -319,6 +355,13 @@ export interface RadarData {
   model_version: string;
   fit: { a: number; b: number; peer_count: number; excluded_peer_count: number; offsets: Record<string, number> };
   validation: Validation;
+  /** Tenure / launch-odds analysis (P3): odds per age bucket over all 758
+   *  snapshot protocols, plus the held-out hit rate of predicting token
+   *  status from bucket odds. Descriptive only — it never enters the fit. */
+  tenure: TenureAnalysis;
+  /** All 105 fit peers as scatter points (TVL, market cap) for the cover
+   *  chart — the Live view still carries only the 24 largest. */
+  peer_points: { tvl_usd: number; mcap_usd: number }[];
   accounting: { total: number; ranked: number; watchlist: number; above_floor: number; early: number; traded: number; set_aside: number };
   watchlist_size: number;
   board_size: number;
@@ -643,6 +686,80 @@ export function launchOdds(snapshot: Snapshot, asOf: string, p: SnapshotProtocol
 }
 
 /* ------------------------------------------------------------------ */
+/* Tenure / launch-odds analysis (P3, descriptive only — never fitted) */
+/* ------------------------------------------------------------------ */
+
+const TENURE_LABELS = ['0–6 mo', '6–12 mo', '1–2 y', '2–3 y', '3–4 y', '4+ y'];
+
+/**
+ * Odds per age bucket over ALL snapshot protocols (token = gecko_id or
+ * symbol non-null), plus a held-out hit rate: leave-one-out bucket odds,
+ * predict "has token" iff the bucket odds are >= 0.5, and count how often
+ * that prediction is right, against the majority-class base rate. The
+ * buckets are the same ones launchOdds() uses for the farm economics.
+ * Nothing here enters the value formula; it is shown as-is, including
+ * when it barely beats the base rate.
+ */
+export function tenureAnalysis(snapshot: Snapshot, asOf: string): TenureAnalysis {
+  const hasToken = (p: SnapshotProtocol): boolean => p.gecko_id !== null || p.symbol !== null;
+  const bucketOf = (p: SnapshotProtocol): string => {
+    const a = ageDays(asOf, p.listed_at);
+    if (a === null) return 'null';
+    for (let i = 0; i < ODDS_BUCKETS.length; i++) {
+      if (a >= ODDS_BUCKETS[i]![0] && a < ODDS_BUCKETS[i]![1]) return `b${i}`;
+    }
+    return 'null';
+  };
+  const buckets: TenureBucket[] = ODDS_BUCKETS.map(([lo, hi], i) => {
+    const ps = snapshot.protocols.filter((p) => bucketOf(p) === `b${i}`);
+    const token = ps.filter(hasToken).length;
+    return {
+      label: TENURE_LABELS[i]!,
+      min_days: lo,
+      max_days: Number.isFinite(hi) ? hi : null,
+      n: ps.length,
+      token,
+      odds: ps.length === 0 ? 0 : round4(token / ps.length),
+    };
+  });
+  const unknown = snapshot.protocols.filter((p) => bucketOf(p) === 'null');
+  const unknownToken = unknown.filter(hasToken).length;
+  buckets.push({
+    label: 'age unknown',
+    min_days: null,
+    max_days: null,
+    n: unknown.length,
+    token: unknownToken,
+    odds: unknown.length === 0 ? 0 : round4(unknownToken / unknown.length),
+  });
+  const byBucket = new Map<string, SnapshotProtocol[]>();
+  for (const p of snapshot.protocols) {
+    const k = bucketOf(p);
+    const list = byBucket.get(k);
+    if (list === undefined) byBucket.set(k, [p]);
+    else list.push(p);
+  }
+  let correct = 0;
+  for (const p of snapshot.protocols) {
+    const others = byBucket.get(bucketOf(p))!.filter((q) => q !== p);
+    const o = others.length === 0 ? 0 : others.filter(hasToken).length / others.length;
+    if ((o >= 0.5) === hasToken(p)) correct++;
+  }
+  const tokenTotal = snapshot.protocols.filter(hasToken).length;
+  const baseRate = Math.max(tokenTotal, snapshot.protocols.length - tokenTotal) / snapshot.protocols.length;
+  return {
+    buckets,
+    held_out: {
+      n: snapshot.protocols.length,
+      correct,
+      accuracy_pct: round2((correct / snapshot.protocols.length) * 100),
+      base_rate_pct: round2(baseRate * 100),
+      rule: 'leave-one-out bucket odds; predict "has token" iff odds >= 0.5',
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Sibling haircut (kin-linked rows)                                   */
 /* ------------------------------------------------------------------ */
 
@@ -787,12 +904,14 @@ export function validateModel(snapshot: Snapshot, m: ModelConstants = MODEL): Va
         loo_within_3x_pct: l.within_3x_pct,
         loo_spearman: l.spearman,
         wf_mean_miss_x: w.mean_median_miss_x,
+        wf_mean_within_3x_pct: w.mean_within_3x_pct,
       });
     }
   }
   const ablation: Validation['ablation'] = [];
   const variants: { variant: string; opts: FitOptions }[] = [
     { variant: 'curve-only', opts: { ...FINAL_OPTIONS, useCat: false, useGrowth: false } },
+    { variant: 'curve+growth', opts: { ...FINAL_OPTIONS, useCat: false, useGrowth: true } },
     { variant: 'curve+category', opts: { ...FINAL_OPTIONS, useGrowth: false } },
     { variant: 'curve+category+growth (final)', opts: { ...FINAL_OPTIONS } },
     { variant: 'curve+category+tenure', opts: { ...FINAL_OPTIONS, useGrowth: false, useTenure: true } },
@@ -803,7 +922,7 @@ export function validateModel(snapshot: Snapshot, m: ModelConstants = MODEL): Va
   for (const { variant, opts } of variants) {
     const l = looMetric(peers, snapshot.as_of, snapshot, opts, m).stat;
     const w = wfMetric(peers, snapshot.as_of, snapshot, opts, m);
-    ablation.push({ variant, loo_median_miss_x: l.median_miss_x, loo_within_3x_pct: l.within_3x_pct, loo_spearman: l.spearman, wf_mean_miss_x: w.mean_median_miss_x });
+    ablation.push({ variant, loo_median_miss_x: l.median_miss_x, loo_within_3x_pct: l.within_3x_pct, loo_spearman: l.spearman, wf_mean_miss_x: w.mean_median_miss_x, wf_mean_within_3x_pct: w.mean_within_3x_pct });
   }
   return {
     fit_peers: peers.length,
@@ -985,7 +1104,7 @@ function priceSize(
 export function farmEconomics(p: SnapshotProtocol, implied: number, impliedP25: number, impliedP75: number, odds: number, age: number | null, steps: FarmStep[], m: ModelConstants = MODEL): FarmPlan {
   const gas = gasPerTx(p, m);
   const posYield = positionYieldFor(p, m);
-  // No dilution haircut in radar-5: the slice is conditional on the token
+  // No dilution haircut in radar-6: the slice is conditional on the token
   // launching (10% of implied value, pro-rata by deposit/TVL). The launch
   // odds weight the slice into expected net — they are never multiplied
   // into implied value, which stays conditional (MODEL.md §c).
@@ -998,6 +1117,15 @@ export function farmEconomics(p: SnapshotProtocol, implied: number, impliedP25: 
   const timeShare = 1;
   const hours = steps.reduce((s, st) => s + st.time_min, 0) / 60;
   const main = priceSize(p, implied, impliedP25, impliedP75, odds, 1000, gas, hours, posYield, m);
+  // Pays-from ticket (P4): net(dep) = dep x (odds x share x implied / TVL
+  // - net forgone rate) - fees, so net = 0 at dep = fees / (expected slice
+  // per dollar - net forgone rate). Gas is fixed, forgone yield scales
+  // with the deposit. Null when the forgone rate alone outruns the
+  // expected slice per dollar: no ticket size ever pays.
+  const slicePerDollar = (odds * m.airdrop_share * implied) / p.tvl_usd;
+  const forgoneRate = (m.tbill_rate - posYield) * (m.hold_days / 365);
+  const paysDenom = slicePerDollar - forgoneRate;
+  const paysFrom = paysDenom > 0 ? round2((txCountFor(p, m) * gas) / paysDenom) : null;
   return {
     deposit_usd: 1000,
     tx_count: txCountFor(p, m),
@@ -1012,6 +1140,7 @@ export function farmEconomics(p: SnapshotProtocol, implied: number, impliedP25: 
     slice_usd: main.slice_usd,
     net_usd: main.net_usd,
     breakeven_odds: main.breakeven_odds,
+    pays_from_usd: paysFrom,
     net_per_hour_usd: round2(main.net_usd / hours),
     verdict: main.verdict,
     stop_tvl_usd: Math.round(p.tvl_usd * 0.8),
@@ -1350,6 +1479,10 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     model_version: MODEL_VERSION,
     fit: { a: round4(fit.curve.a), b: round4(fit.curve.b), peer_count: peers.length, excluded_peer_count: excluded, offsets },
     validation,
+    tenure: tenureAnalysis(snapshot, snapshot.as_of),
+    peer_points: peers
+      .map((p) => ({ tvl_usd: p.tvl_usd, mcap_usd: p.mcap_usd! }))
+      .sort((a, b) => a.tvl_usd - b.tvl_usd),
     accounting: {
       total: snapshot.protocols.length,
       ranked: board.length,

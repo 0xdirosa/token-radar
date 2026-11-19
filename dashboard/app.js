@@ -1,12 +1,17 @@
-// Token Radar dashboard (radar-4). Reads window.RADAR (data.js beside this
+// Token Radar dashboard (radar-6). Reads window.RADAR (data.js beside this
 // page) and renders cover, board, live, method and set-aside views plus a
 // per-protocol detail. No network: every number shown comes from data.js,
 // except the set-aside reason counts, which are the snapshot audit in
 // MODEL.md section (a) and are labelled as such.
+//
+// What-if: the airdrop-share and T-bill switchers reprice every row
+// client-side from the same formula the server uses (slice scales with
+// share, forgone yield scales with the T-bill rate, gas is fixed). At the
+// defaults (10% / 4.5%) the page shows the server's own numbers exactly.
 (function(){'use strict';
 var D=window.RADAR,app=document.getElementById('main'),live=document.getElementById('live'),dlg=document.getElementById('dlg');
 if(!D||!app)return;
-var S={view:'cover',q:'',cat:'all',chain:'all',tier:'all',verdict:'all',dep:1000,sort:'impl',desc:true,p:null};
+var S={view:'cover',q:'',cat:'all',chain:'all',tier:'all',verdict:'all',dep:1000,share:0.1,tbill:0.045,sort:'impl',desc:true,p:null};
 var DEP={500:0,1000:1,5000:2,10000:3};
 var SETASIDE=[['CEX',42],['Liquid Staking',38],['Bridge',28],['Canonical Bridge',15],['Versioned name',11],['Wrapped / staked name',5],['Liquid Restaking',3],['Restaked BTC',2]];
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -16,15 +21,54 @@ function pct(n){if(n==null||!isFinite(n))return'n/a';return(n>0?'+':'')+n.toFixe
 function age(d){if(d==null)return'unknown';if(d>=365)return(d/365).toFixed(1)+'y';return Math.max(0,Math.round(d))+'d';}
 function odds(n){return n==null?'n/a':(n*100).toFixed(0)+'%';}
 function be(n){if(!isFinite(n))return'—';return n>=10?n.toFixed(1):n.toFixed(2);}
-function sz(r){return r.farm.sizes[DEP[S.dep]];}
+function paysUsd(n){if(n==null)return'never';return usd2(n);}
+function usdFull(n){if(n==null||!isFinite(n))return'n/a';return(n<0?'-$':'$')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+/** One deposit size priced at the current what-if settings. At the defaults
+ *  (share 10%, T-bill 4.5%) this is exactly the server's priceSize; off the
+ *  defaults it is the same formula with the new share / T-bill rate. */
+function price(r,dep,share,tbill){var f=r.farm;
+ var sliceAt=function(v){return share*v*(dep/r.tvl_usd);};
+ var slice=sliceAt(r.implied_value_usd);
+ var fees=f.fees_usd;
+ var forgone=dep*(tbill-f.position_yield_rate)*(D.model.hold_days/365);
+ var cost=fees+forgone;
+ var net=r.launch_odds*slice-cost;
+ var netLo=r.launch_odds*sliceAt(r.implied_p25_usd)-cost;
+ var netHi=r.launch_odds*sliceAt(r.implied_p75_usd)-cost;
+ var br=slice>0?cost/slice:Infinity;
+ var verdict=netLo>0?'ROBUST':net>0?'FARM':netHi>0?'THIN':'SKIP';
+ return{deposit_usd:dep,slice_usd:slice,fees_usd:fees,forgone_usd:forgone,total_cost_usd:cost,net_usd:net,breakeven_odds:br,verdict:verdict};}
+/** The row priced at the current deposit and what-if settings. At the
+ *  defaults this returns the server's own FarmSize, so the board matches
+ *  board.json exactly; off the defaults it reprices from price(). */
+function sz(r){if(S.share===0.1&&S.tbill===0.045)return r.farm.sizes[DEP[S.dep]];return price(r,S.dep,S.share,S.tbill);}
+/** Pays-from ticket at the current what-if settings: the smallest deposit
+ *  whose expected net is zero (fees / (expected slice per dollar − net
+ *  forgone rate)); null when no ticket size ever pays. At the defaults this
+ *  is the server's pays_from_usd. */
+function paysFrom(r){if(S.share===0.1&&S.tbill===0.045)return r.farm.pays_from_usd;
+ var f=r.farm;
+ var perDollar=r.launch_odds*S.share*r.implied_value_usd/r.tvl_usd;
+ var rate=(S.tbill-f.position_yield_rate)*(D.model.hold_days/365);
+ var d=perDollar-rate;
+ return d>0?f.fees_usd/d:null;}
+function csvq(s){s=String(s==null?'':s);return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
+function exportCSV(){var list=sorted(filtered());
+ var lines=[['rank','name','category','chains','tvl_usd','age_days','launch_odds','implied_if_launched_usd','expected_value_usd','slice_usd','expected_net_usd','breakeven_odds','pays_from_usd','verdict'].join(',')];
+ list.forEach(function(r){var f=sz(r);var pf=paysFrom(r);
+  lines.push([r.rank,csvq(r.name),csvq(r.category||''),csvq((r.chains||[]).join(';')),r.tvl_usd,r.age_days==null?'':r.age_days,r.launch_odds,r.implied_value_usd,Math.round(r.launch_odds*r.implied_value_usd),f.slice_usd.toFixed(2),f.net_usd.toFixed(2),isFinite(f.breakeven_odds)?f.breakeven_odds.toFixed(4):'',pf==null?'':pf.toFixed(2),f.verdict].join(','));});
+ var blob=new Blob([lines.join('\n')],{type:'text/csv'});
+ var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='token-radar-board.csv';a.click();
+ setTimeout(function(){URL.revokeObjectURL(a.href);},1000);}
 function fmtV(v){return'<span class="v v-'+v+'">'+v+'</span>';}
 function readHash(){var h=new URLSearchParams(location.hash.slice(1));var g=function(k){return h.get(k);};
  if(g('view'))S.view=g('view');if(g('q')!=null)S.q=g('q');if(g('cat'))S.cat=g('cat');if(g('chain'))S.chain=g('chain');
  if(g('tier'))S.tier=g('tier');if(g('verdict'))S.verdict=g('verdict');if(g('dep'))S.dep=+g('dep')||1000;
+ if(g('share')!=null&&g('share')!=='')S.share=+g('share');if(g('tbill')!=null&&g('tbill')!=='')S.tbill=+g('tbill');
  if(g('sort'))S.sort=g('sort');if(g('desc'))S.desc=g('desc')==='1';S.p=g('p');}
 function writeHash(){var p=new URLSearchParams();if(S.view!=='cover')p.set('view',S.view);if(S.q)p.set('q',S.q);
  if(S.cat!=='all')p.set('cat',S.cat);if(S.chain!=='all')p.set('chain',S.chain);if(S.tier!=='all')p.set('tier',S.tier);
- if(S.verdict!=='all')p.set('verdict',S.verdict);if(S.dep!==1000)p.set('dep',S.dep);if(S.sort!=='impl')p.set('sort',S.sort);
+ if(S.verdict!=='all')p.set('verdict',S.verdict);if(S.dep!==1000)p.set('dep',S.dep);if(S.share!==0.1)p.set('share',S.share);if(S.tbill!==0.045)p.set('tbill',S.tbill);if(S.sort!=='impl')p.set('sort',S.sort);
  if(!S.desc)p.set('desc','0');if(S.p)p.set('p',S.p);var s=p.toString();
  history.replaceState(null,'',s?'#'+s:location.pathname+location.search);}
 function seal(){var n=0;for(var i=0;i<D.rows.length;i++){var r=D.rows[i];if(r.rank===i+1&&(i===0||D.rows[i-1].implied_value_usd>=r.implied_value_usd))n++;}
@@ -40,6 +84,9 @@ function sorted(l){var k=S.sort,d=S.desc?-1:1;return l.slice().sort(function(a,b
  if(k==='rank'){av=a.rank;bv=b.rank;}else if(k==='name'){av=a.name.toLowerCase();bv=b.name.toLowerCase();}
  else if(k==='tvl'){av=a.tvl_usd;bv=b.tvl_usd;}else if(k==='chg'){av=a.change_7d==null?-1e9:a.change_7d;bv=b.change_7d==null?-1e9:b.change_7d;}
  else if(k==='age'){av=a.age_days==null?1e9:a.age_days;bv=b.age_days==null?1e9:b.age_days;}
+ else if(k==='odds'){av=a.launch_odds;bv=b.launch_odds;}
+ else if(k==='exp'){av=a.launch_odds*a.implied_value_usd;bv=b.launch_odds*b.implied_value_usd;}
+ else if(k==='pays'){var pa=paysFrom(a),pb=paysFrom(b);av=pa==null?Infinity:pa;bv=pb==null?Infinity:pb;}
  else if(k==='slice'){av=sz(a).slice_usd;bv=sz(b).slice_usd;}else if(k==='net'){av=sz(a).net_usd;bv=sz(b).net_usd;}
  else if(k==='be'){av=sz(a).breakeven_odds;bv=sz(b).breakeven_odds;}else if(k==='nph'){av=sz(a).net_per_hour_usd;bv=sz(b).net_per_hour_usd;}
  else{av=a.implied_value_usd;bv=b.implied_value_usd;}
@@ -48,15 +95,17 @@ function th(k,label,cls){return'<th class="'+(cls||'')+'"><button data-sort="'+k
 function nav(){var v=[['cover','Cover'],['board','Board'],['live','Live token'],['method','Method'],['setaside','Set aside']];
  return'<nav class="nav" aria-label="Views">'+v.map(function(x){return'<button data-view="'+x[0]+'" aria-pressed="'+(S.view===x[0])+'">'+x[1]+'</button>';}).join('')+'</nav>';}
 function header(){return'<header class="top"><div class="brand"><span class="mark"></span><b>Token Radar</b><span class="sub">'+esc(D.model_version)+' · snapshot '+esc(D.as_of)+' · DefiLlama protocols</span></div><div class="top-meta"><span class="seal">page = board.json: '+seal()+'</span><span>'+D.rows.length+' ranked</span></div></header>';}
-function cover(){var V=D.validation,A=D.accounting,c=counts();
+function cover(){var V=D.validation,A=D.accounting;
+ var p1=function(r){return S.share===0.1&&S.tbill===0.045?r.farm.sizes[1]:price(r,1000,S.share,S.tbill);};
+ var c={ROBUST:0,FARM:0,THIN:0,SKIP:0};D.rows.forEach(function(r){c[p1(r).verdict]++;});
  var tot=D.rows.reduce(function(s,r){return s+r.implied_value_usd;},0);
- var farmFirst=D.rows.filter(function(r){return r.farm.verdict==='ROBUST'||r.farm.verdict==='FARM';}).sort(function(a,b){return b.farm.net_per_hour_usd-a.farm.net_per_hour_usd;});
- var best=farmFirst.slice(0,4).map(function(r){return'<li><b>'+esc(r.name)+'</b> — '+r.farm.verdict+' · expected net '+usd2(r.farm.net_usd)+', break-even odds '+be(r.farm.breakeven_odds)+', '+usd2(r.farm.net_per_hour_usd)+'/active hour, slice '+usd2(r.farm.slice_usd)+' if it launches on $1,000</li>';}).join('')||'<li>No ROBUST or FARM row at $1,000.</li>';
- var depCounts=[500,1000,5000,10000].map(function(d){var cc={ROBUST:0,FARM:0,THIN:0,SKIP:0};D.rows.forEach(function(r){cc[r.farm.sizes[DEP[d]].verdict]++;});return'<tr><td class="num">$'+d.toLocaleString('en-US')+'</td><td class="num">'+cc.ROBUST+'</td><td class="num">'+cc.FARM+'</td><td class="num">'+cc.THIN+'</td><td class="num">'+cc.SKIP+'</td></tr>';}).join('');
- var book=D.rows.map(function(r){return{s:r.farm.sizes[3],r:r};}).sort(function(a,b){return b.s.net_usd-a.s.net_usd;}).slice(0,10);
+ var farmFirst=D.rows.filter(function(r){var v=p1(r).verdict;return v==='ROBUST'||v==='FARM';}).sort(function(a,b){return p1(b).net_usd/b.farm.hours-p1(a).net_usd/a.farm.hours;});
+ var best=farmFirst.slice(0,4).map(function(r){var f=p1(r);return'<li><b>'+esc(r.name)+'</b> — '+f.verdict+' · expected net '+usd2(f.net_usd)+', break-even odds '+be(f.breakeven_odds)+', '+usd2(f.net_usd/r.farm.hours)+'/active hour, slice '+usd2(f.slice_usd)+' if it launches on $1,000</li>';}).join('')||'<li>No ROBUST or FARM row at $1,000.</li>';
+ var depCounts=[500,1000,5000,10000].map(function(d){var cc={ROBUST:0,FARM:0,THIN:0,SKIP:0};D.rows.forEach(function(r){cc[(S.share===0.1&&S.tbill===0.045?r.farm.sizes[DEP[d]]:price(r,d,S.share,S.tbill)).verdict]++;});return'<tr><td class="num">$'+d.toLocaleString('en-US')+'</td><td class="num">'+cc.ROBUST+'</td><td class="num">'+cc.FARM+'</td><td class="num">'+cc.THIN+'</td><td class="num">'+cc.SKIP+'</td></tr>';}).join('');
+ var book=D.rows.map(function(r){return{s:S.share===0.1&&S.tbill===0.045?r.farm.sizes[3]:price(r,10000,S.share,S.tbill),r:r};}).sort(function(a,b){return b.s.net_usd-a.s.net_usd;}).slice(0,10);
  var bookFees=book.reduce(function(s,x){return s+x.s.fees_usd;},0),bookForg=book.reduce(function(s,x){return s+x.s.forgone_usd;},0),bookSlice=book.reduce(function(s,x){return s+x.s.slice_usd;},0),bookExpSlice=book.reduce(function(s,x){return s+x.r.launch_odds*x.s.slice_usd;},0),bookNet=book.reduce(function(s,x){return s+x.s.net_usd;},0),bookCost=bookFees+bookForg;
  var bookRows=book.map(function(x){return'<tr><td><b>'+esc(x.r.name)+'</b></td><td class="num">'+usd2(x.s.slice_usd)+'</td><td class="num">'+usd2(x.s.total_cost_usd)+'</td><td class="num">'+usd2(x.s.net_usd)+'</td><td class="num">'+be(x.s.breakeven_odds)+'</td><td>'+fmtV(x.s.verdict)+'</td></tr>';}).join('');
- return'<section class="lede"><h1>198 pre-token protocols, priced off the curve the traded tokens set</h1><p>Implied value is a fitted log-log size curve on '+V.fit_peers+' traded peers, shrunk category offsets and a small 7-day growth term — tested out of sample, not asserted. Every row carries a band, a rank range and a costed 45-day farm plan, and its net is expected value — launch odds × slice − costs — not a promise that the token launches. Implied value is an estimate, not a price and not a promise of a launch.</p></section>'
+ return'<section class="lede"><h1>198 pre-token protocols, priced off the curve the traded tokens set</h1><p>Implied value is a fitted log-log size curve on '+V.fit_peers+' traded peers, shrunk category offsets and a small 7-day growth term — tested out of sample, not asserted. Every row carries a band, a rank range and a costed 45-day farm plan, and its net is expected value — launch odds × slice − costs — not a promise that the token launches. Implied value is an estimate, not a price and not a promise of a launch. The board also shows each row’s launch odds, its value if launched, and the odds-weighted expected value — the ranking stays by the conditional value if launched.</p></section>'
  +'<div class="stats">'
  +'<div class="stat"><span>Watchlist covered</span><b>'+A.watchlist+' / '+A.watchlist+'</b></div>'
  +'<div class="stat"><span>Ranked</span><b>'+A.ranked+'</b></div>'
@@ -64,7 +113,7 @@ function cover(){var V=D.validation,A=D.accounting,c=counts();
  +'<div class="stat"><span>Set aside</span><b>'+A.set_aside+'</b></div>'
  +'<div class="stat"><span>Total implied board</span><b>'+usd(tot)+'</b></div>'
  +'<div class="stat"><span>Median implied</span><b>'+usd(D.rows[98].implied_value_usd)+'</b></div></div>'
- +'<div class="grid"><section class="panel"><h2>How a value is built</h2><p class="sub">Huber fit on '+V.fit_peers+' traded peers (Bridge, Canonical Bridge and CEX excluded — their tokens price a different thing). Ten times the TVL is worth ×'+Math.pow(10,D.fit.b).toFixed(2)+', not ×10.</p><div class="formula">log10(implied) = '+D.fit.a.toFixed(4)+' + '+D.fit.b.toFixed(4)+' · log10(TVL / $100M)<br>+ category offset (shrunk, k='+D.model.cat_shrinkage_k+') + '+D.model.growth_weight_log10+' · clamp(7d change, '+D.model.growth_floor+', '+D.model.growth_cap+') / 100<br>× sibling multiplier (×0.5 if kin-linked, else ×1)</div><canvas class="chart" id="chart" width="640" height="300" aria-label="Scatter chart: traded tokens against the fitted curve with the P25-P75 band"></canvas><p class="note">Dots: the 24 largest traded tokens (green) and the 198 board values (blue) against TVL. Band: the blind P25–P75 range from leave-one-out residuals. Curve fitted on all '+V.fit_peers+' peers, not only the 24 shown.</p></section>'
+ +'<div class="grid"><section class="panel"><h2>How a value is built</h2><p class="sub">Huber fit on '+V.fit_peers+' traded peers (Bridge, Canonical Bridge and CEX excluded — their tokens price a different thing). Ten times the TVL is worth ×'+Math.pow(10,D.fit.b).toFixed(2)+', not ×10.</p><div class="formula">log10(implied) = '+D.fit.a.toFixed(4)+' + '+D.fit.b.toFixed(4)+' · log10(TVL / $100M)<br>+ category offset (shrunk, k='+D.model.cat_shrinkage_k+') + '+D.model.growth_weight_log10+' · clamp(7d change, '+D.model.growth_floor+', '+D.model.growth_cap+') / 100<br>× sibling multiplier (×0.5 if kin-linked, else ×1)</div><canvas class="chart" id="chart" width="640" height="300" aria-label="Scatter chart: traded tokens against the fitted curve with the P25-P75 band"></canvas><p class="note">Dots: all '+D.peer_points.length+' traded peers (green) and the 198 board values (blue) against TVL. Band: the blind P25–P75 range from leave-one-out residuals. Curve fitted on all '+V.fit_peers+' peers.</p></section>'
  +'<section class="panel"><h2>Out of sample</h2><p class="sub">Each traded token priced by a fit that never saw it; then fit on old listings, tested on newer ones.</p><dl class="kv">'
  +'<dt>Leave-one-out median miss</dt><dd>×'+V.loo.median_miss_x+' vs ×'+V.flat.loo.median_miss_x+' flat</dd>'
  +'<dt>Within 3× of the real cap</dt><dd>'+V.loo.within_3x_pct+'% vs '+V.flat.loo.within_3x_pct+'% flat</dd>'
@@ -73,11 +122,18 @@ function cover(){var V=D.validation,A=D.accounting,c=counts();
  +'<dt>Rank correlation (LOO)</dt><dd>'+V.loo.spearman+' (flat '+V.flat.loo.spearman+')</dd>'
  +'<dt>Blind band coverage</dt><dd>P25–P75 '+V.bands.p25_75_coverage_pct+'% · P10–P90 '+V.bands.p10_90_coverage_pct+'%</dd>'
  +'<dt>Rank range</dt><dd>200 bootstrap refits, seed '+D.model.bootstrap_seed+'</dd></dl>'
- +'<h3 style="margin-top:14px">Best farms by net per active hour — read honestly</h3><p class="sub">At $1,000: <b>'+c.ROBUST+' ROBUST / '+c.FARM+' FARM / '+c.THIN+' THIN / '+c.SKIP+' SKIP</b>. The rows below are the best ROBUST and FARM rows by expected net per hands-on hour (hours are the plan steps only — the 45-day hold is passive). Net is expected value: launch odds × slice − costs.</p><ul class="tight">'+best+'</ul>'
+ +'<h3 style="margin-top:14px">Ablation, step by step — each term earned its place</h3><p class="sub">Same 105 traded peers, same two blind tests at every step (LOO: each peer priced by a fit that never saw it; WF: fit on older listings, tested on newer ones, mean of 3 cutoffs). A term is kept only if it wins both tests.</p><table><thead><tr><th>Model</th><th class="num">LOO miss</th><th class="num">LOO in 3×</th><th class="num">WF miss</th><th class="num">WF in 3×</th></tr></thead><tbody>'
+ +'<tr><td>Flat multiple (median mcap / TVL)</td><td class="num">×'+V.flat.loo.median_miss_x+'</td><td class="num">'+V.flat.loo.within_3x_pct+'%</td><td class="num">×'+V.flat.walk_forward_mean_median_miss_x+'</td><td class="num">'+V.flat.walk_forward_mean_within_3x_pct+'%</td></tr>'
+ +['curve-only','curve+growth','curve+category','curve+category+growth (final)'].map(function(name){var a=V.ablation.filter(function(x){return x.variant===name;})[0];if(!a)return'';return'<tr><td>'+(name==='curve+category+growth (final)'?'<b>'+esc(name)+' — final</b>':esc(name))+'</td><td class="num">×'+a.loo_median_miss_x+'</td><td class="num">'+a.loo_within_3x_pct+'%</td><td class="num">×'+a.wf_mean_miss_x+'</td><td class="num">'+a.wf_mean_within_3x_pct+'%</td></tr>';}).join('')
+ +'</tbody></table><p class="note">The curve alone beats the flat multiple (×3.18 vs ×5.02 LOO). Growth alone helps a little (×3.12); category offsets alone cost a little (×3.22); together they reach ×3.09 — the final model. Terms the blind test rejected are listed in the Method tab: tenure (×3.51), breadth (×3.70), and a launch-odds multiplier (×3.71 LOO, ×4.05 WF).</p>'
+ +'<h3 style="margin-top:14px">Best farms by net per active hour — read honestly</h3><p class="sub">At $1,000, '+(S.share*100).toFixed(0)+'% airdrop share, '+(S.tbill*100).toFixed(1)+'% T-bill: <b>'+c.ROBUST+' ROBUST / '+c.FARM+' FARM / '+c.THIN+' THIN / '+c.SKIP+' SKIP</b>. The rows below are the best ROBUST and FARM rows by expected net per hands-on hour (hours are the plan steps only — the 45-day hold is passive). Net is expected value: launch odds × slice − costs.</p><ul class="tight">'+best+'</ul>'
  +'<table style="margin-top:10px"><thead><tr><th>Deposit</th><th class="num">ROBUST</th><th class="num">FARM</th><th class="num">THIN</th><th class="num">SKIP</th></tr></thead><tbody>'+depCounts+'</tbody></table>'
  +'<h3 style="margin-top:14px">Farm book — the 10 best farms at $10,000</h3><p class="sub">One $10,000 ticket in each: capital $100,000 · fees '+usd2(bookFees)+' · forgone '+usd2(bookForg)+' · expected slices '+usd2(bookExpSlice)+' · expected net '+usd2(bookNet)+' · book break-even '+(bookSlice>0?(bookCost/bookSlice).toFixed(2):'—')+' (1 in '+(bookSlice>0&&bookCost>0?Math.round(bookSlice/bookCost):'—')+').</p></section></div>'
  +'<div class="grid2"><section class="panel"><h2>Accounting: all 758 protocols</h2><p class="sub">Ranked '+A.ranked+' = watchlist '+A.watchlist+' + above the $50M floor '+A.above_floor+' + early below it '+A.early+'. Traded '+A.traded+' are set apart (their caps set the curve). Set aside '+A.set_aside+' pre-token protocols fail the watchlist rule.</p><dl class="kv"><dt>Ranked</dt><dd>'+A.ranked+'</dd><dt>Already trade a token</dt><dd>'+A.traded+'</dd><dt>Set aside</dt><dd>'+A.set_aside+'</dd><dt>Total</dt><dd>'+A.total+'</dd></dl></section>'
  +'<section class="panel"><h2>Top of the board</h2><p class="sub">Value is capped by the curve: the largest TVL on the board ($2.76B) is worth '+usd(D.rows[0].implied_value_usd)+' implied, not billions.</p><ul class="tight">'+D.rows.slice(0,5).map(function(r){return'<li><b>#'+r.rank+' '+esc(r.name)+'</b> — '+usd(r.implied_value_usd)+' (P25–P75 '+usd(r.implied_p25_usd)+'–'+usd(r.implied_p75_usd)+'), rank range '+r.rank_lo+'–'+r.rank_hi+'</li>';}).join('')+'</ul><p class="note">See the Board tab for the full ranking with farm economics per row.</p></section></div>'
+ +'<section class="panel"><h2>Tenure: who has a token, by age</h2><p class="sub">Launch odds by age bucket, over all 758 snapshot protocols — the same buckets that weight the farm slice into expected net. Older protocols are more likely to record a token; the 1–2 year bucket dips below the 6–12 month one, so the pattern is not a clean staircase.</p><table><thead><tr><th>Age with no token</th><th class="num">Protocols</th><th class="num">With token</th><th class="num">Launch odds</th></tr></thead><tbody>'
+ +D.tenure.buckets.map(function(b){return'<tr><td>'+esc(b.label)+'</td><td class="num">'+b.n+'</td><td class="num">'+b.token+'</td><td class="num">'+(b.odds*100).toFixed(1)+'%</td></tr>';}).join('')
+ +'</tbody></table><dl class="kv" style="margin-top:10px"><dt>Held-out hit rate</dt><dd>'+D.tenure.held_out.accuracy_pct+'% ('+D.tenure.held_out.correct+' / '+D.tenure.held_out.n+')</dd><dt>Base rate (majority class)</dt><dd>'+D.tenure.held_out.base_rate_pct+'%</dd></dl><p class="note">Held-out means leave-one-out bucket odds: predict “has token” iff the row’s bucket odds are ≥ 0.5. Bucket odds alone beat the base rate by '+(D.tenure.held_out.accuracy_pct-D.tenure.held_out.base_rate_pct).toFixed(2)+' points — a real but modest signal. That is why age is NOT in the value formula: adding tenure to the fit made the blind test worse (LOO ×3.51 vs ×3.09, Method tab). Age weights the farm economics only.</p></section>'
  +'<section class="panel"><h2>Farm book — the 10 best farms at $10,000</h2><p class="sub">The same ten rows as the summary above, one $10,000 ticket each. Slices are stated if the token launches; nets are expected value (launch odds × slice − costs).</p><table><thead><tr><th>Protocol</th><th class="num">Slice if launch</th><th class="num">Cost</th><th class="num">Expected net</th><th class="num">Break-even</th><th>Verdict</th></tr></thead><tbody>'+bookRows+'</tbody></table></section>';}
 function controls(){var cats=[],chains=[];D.rows.forEach(function(r){if(cats.indexOf(r.category||'Other')<0)cats.push(r.category||'Other');(r.chains||[]).forEach(function(c){if(chains.indexOf(c)<0)chains.push(c);});});
  cats.sort();chains.sort();var c=counts();
@@ -89,17 +145,31 @@ function controls(){var cats=[],chains=[];D.rows.forEach(function(r){if(cats.ind
  +'<div class="field"><span>Tier</span><div class="chips"><button data-tier="all" aria-pressed="'+(S.tier==='all')+'">All '+D.rows.length+'</button><button data-tier="watchlist" aria-pressed="'+(S.tier==='watchlist')+'">Watchlist '+D.accounting.watchlist+'</button><button data-tier="above-floor" aria-pressed="'+(S.tier==='above-floor')+'">Above floor '+D.accounting.above_floor+'</button><button data-tier="early" aria-pressed="'+(S.tier==='early')+'">Early '+D.accounting.early+'</button></div></div>'
  +'<div class="field"><span>Verdict at $'+S.dep.toLocaleString('en-US')+'</span><div class="chips">'+chip('all','All',D.rows.length)+chip('ROBUST','ROBUST',c.ROBUST)+chip('FARM','FARM',c.FARM)+chip('THIN','THIN',c.THIN)+chip('SKIP','SKIP',c.SKIP)+'</div></div>'
  +'<div class="field"><span>Deposit</span><div class="dep">'+[500,1000,5000,10000].map(function(d){return'<button data-dep="'+d+'" aria-pressed="'+(S.dep===d)+'">$'+(d>=1000?(d/1000)+'K':d)+'</button>';}).join('')+'</div></div>'
+ +'<div class="field"><span>Airdrop share</span><div class="dep">'+[0.05,0.1,0.2].map(function(s){return'<button data-share="'+s+'" aria-pressed="'+(S.share===s)+'">'+(s*100).toFixed(0)+'%</button>';}).join('')+'</div></div>'
+ +'<div class="field"><span>T-bill yield</span><div class="dep">'+[0,0.04,0.08].map(function(t){return'<button data-tbill="'+t+'" aria-pressed="'+(S.tbill===t)+'">'+(t*100).toFixed(0)+'%</button>';}).join('')+'</div></div>'
+ +'<div class="field"><span>Export</span><button class="button" data-csv="1">Export CSV</button></div>'
  +'<span class="count" id="count"></span></div>';}
 function board(){var list=sorted(filtered());
+ var farmable=list.filter(function(r){var v=sz(r).verdict;return v==='ROBUST'||v==='FARM';});
+ var bookNet=farmable.reduce(function(s,r){return s+sz(r).net_usd;},0);
+ var bookHrs=farmable.reduce(function(s,r){return s+r.farm.hours;},0);
+ var bookCap=farmable.length*S.dep;
+ var bookLine=farmable.length>0
+  ?'<div class="panel" style="padding:12px 16px;margin-bottom:12px"><b>Farming all '+farmable.length+' ROBUST / FARM rows in this view at $'+S.dep.toLocaleString('en-US')+' each nets '+usdFull(bookNet)+' expected for '+bookHrs.toFixed(2)+' h of work</b><span class="sub"> — capital $'+bookCap.toLocaleString('en-US')+', '+(S.share*100).toFixed(0)+'% airdrop share, '+(S.tbill*100).toFixed(1)+'% T-bill. Expected value: launch odds × slice − costs, per row.</span></div>'
+  :'<div class="panel" style="padding:12px 16px;margin-bottom:12px"><b>No ROBUST or FARM row in this view at $'+S.dep.toLocaleString('en-US')+'</b><span class="sub"> — loosen the filters or raise the deposit.</span></div>';
  var rows=list.map(function(r){var f=sz(r);var g=r.change_7d==null?'':r.change_7d>=0?'pos':'neg';
+  var pf=paysFrom(r);
   return'<tr data-slug="'+esc(r.slug)+'" tabindex="0"><td class="num">#'+r.rank+'<br><span class="band">'+r.rank_lo+'–'+r.rank_hi+'</span></td>'
   +'<td class="name"><b>'+esc(r.name)+'</b><span>'+esc(r.category||'Other')+' · '+esc((r.chains||[]).slice(0,2).join(', ')||'—')+' · '+r.tier+'</span></td>'
   +'<td class="num">'+usd(r.tvl_usd)+'</td><td class="num '+g+'">'+pct(r.change_7d)+'</td><td class="num">'+age(r.age_days)+'</td>'
   +'<td class="num">'+usd(r.implied_value_usd)+'<br><span class="band">'+usd(r.implied_p25_usd)+'–'+usd(r.implied_p75_usd)+'</span></td>'
-  +'<td class="num">'+usd2(f.slice_usd)+'</td><td class="num">'+usd2(f.net_usd)+'</td><td class="num">'+be(f.breakeven_odds)+'</td><td class="num">'+usd2(f.net_usd/r.farm.hours)+'/h</td>'
+  +'<td class="num">'+odds(r.launch_odds)+'</td>'
+  +'<td class="num">'+usd(Math.round(r.launch_odds*r.implied_value_usd))+'</td>'
+  +'<td class="num">'+usd2(f.slice_usd)+'</td><td class="num">'+usd2(f.net_usd)+'</td><td class="num">'+be(f.breakeven_odds)+'</td><td class="num">'+paysUsd(pf)+'</td><td class="num">'+usd2(f.net_usd/r.farm.hours)+'/h</td>'
   +'<td>'+fmtV(f.verdict)+'</td></tr>';}).join('');
- return'<section class="panel twrap"><div class="table-wrap"><table><caption class="sub" style="text-align:left;padding:10px 12px 0">Pre-token protocols, strongest implied value first. Slice, expected net, break-even and verdict are for a $'+S.dep.toLocaleString('en-US')+' deposit and a 45-day hold; use the switcher to reprice. Select a row for its build-up, comps and farm plan.</caption><thead><tr>'
- +th('rank','Rank')+th('name','Protocol')+th('tvl','TVL','num')+th('chg','7d','num')+th('age','Age','num')+th('impl','Implied value','num')+th('slice','$'+(S.dep>=1000?(S.dep/1000)+'K':S.dep)+' slice','num')+th('net','Expected net','num')+th('be','Break-even','num')+th('nph','Net / hour','num')+'<th>Verdict</th></tr></thead><tbody>'+rows+'</tbody></table></div></section>'
+ return bookLine
+ +'<section class="panel twrap"><div class="table-wrap"><table><caption class="sub" style="text-align:left;padding:10px 12px 0">Pre-token protocols, strongest implied value if launched first. Implied value is conditional on launch; expected value is launch odds × implied. Slice, expected net, break-even, pays-from and verdict are for a $'+S.dep.toLocaleString('en-US')+' deposit and a 45-day hold at '+(S.share*100).toFixed(0)+'% airdrop share and '+(S.tbill*100).toFixed(1)+'% T-bill; use the switchers to reprice. Select a row for its build-up, comps and farm plan.</caption><thead><tr>'
+ +th('rank','Rank')+th('name','Protocol')+th('tvl','TVL','num')+th('chg','7d','num')+th('age','Age','num')+th('impl','Implied if launched','num')+th('odds','Odds','num')+th('exp','Expected value','num')+th('slice','$'+(S.dep>=1000?(S.dep/1000)+'K':S.dep)+' slice','num')+th('net','Expected net','num')+th('be','Break-even','num')+th('pays','Pays from','num')+th('nph','Net / hour','num')+'<th>Verdict</th></tr></thead><tbody>'+rows+'</tbody></table></div></section>'
  +(list.length===0?'<div class="panel"><div class="empty"><h2>No protocol matches that filter</h2><p>Clear the search or pick another category, chain, tier or verdict.</p><button class="button primary" data-clear="1">Clear filters</button></div></div>':'');}
 function liveView(){var rows=D.live.map(function(r){var off=D.fit.offsets[r.category||'']||0;
  return'<tr><td class="name"><b>'+esc(r.name)+'</b><span>'+esc(r.category||'Other')+' · '+esc((r.chains||[]).slice(0,2).join(', ')||'—')+'</span></td><td class="num">'+usd(r.tvl_usd)+'</td><td class="num">'+usd(r.mcap_usd)+'</td><td class="num">'+(r.mcap_usd&&r.tvl_usd?(r.mcap_usd/r.tvl_usd).toFixed(3)+'×':'n/a')+'</td><td class="num '+((r.change_7d||0)>=0?'pos':'neg')+'">'+pct(r.change_7d)+'</td><td class="num">×'+Math.pow(10,off).toFixed(3)+'</td></tr>';}).join('');
@@ -107,19 +177,23 @@ function liveView(){var rows=D.live.map(function(r){var off=D.fit.offsets[r.cate
  +'<section class="panel twrap"><div class="table-wrap"><table><thead><tr><th>Protocol</th><th class="num">TVL</th><th class="num">Market cap</th><th class="num">mcap / TVL</th><th class="num">7d</th><th class="num">Category ×</th></tr></thead><tbody>'+rows+'</tbody></table></div></section>'
  +'<p class="note">Category × is 10^(category offset) from the fit: the multiplier the same category applies to a board row. Categories with no traded peer get ×1.000 (offset 0).</p>';}
 function methodView(){var V=D.validation;
- var mrows=V.methods.map(function(m){return'<tr><td>'+esc(m.method)+' · '+esc(m.variant)+'</td><td class="num">×'+m.loo_median_miss_x+'</td><td class="num">'+m.loo_within_3x_pct+'%</td><td class="num">'+m.loo_spearman+'</td><td class="num">×'+m.wf_mean_miss_x+'</td></tr>';}).join('');
- var arows=V.ablation.map(function(a){return'<tr><td>'+esc(a.variant)+'</td><td class="num">×'+a.loo_median_miss_x+'</td><td class="num">'+a.loo_within_3x_pct+'%</td><td class="num">'+a.loo_spearman+'</td><td class="num">×'+a.wf_mean_miss_x+'</td></tr>';}).join('');
+ var mrows=V.methods.map(function(m){return'<tr><td>'+esc(m.method)+' · '+esc(m.variant)+'</td><td class="num">×'+m.loo_median_miss_x+'</td><td class="num">'+m.loo_within_3x_pct+'%</td><td class="num">'+m.loo_spearman+'</td><td class="num">×'+m.wf_mean_miss_x+'</td><td class="num">'+m.wf_mean_within_3x_pct+'%</td></tr>';}).join('');
+ var arows=V.ablation.map(function(a){return'<tr><td>'+esc(a.variant)+'</td><td class="num">×'+a.loo_median_miss_x+'</td><td class="num">'+a.loo_within_3x_pct+'%</td><td class="num">'+a.loo_spearman+'</td><td class="num">×'+a.wf_mean_miss_x+'</td><td class="num">'+a.wf_mean_within_3x_pct+'%</td></tr>';}).join('');
  var wrows=V.walk_forward.cutoffs.map(function(w){return'<tr><td>'+esc(w.cutoff)+'</td><td class="num">'+w.train_n+' / '+w.test_n+'</td><td class="num">×'+w.median_miss_x+'</td><td class="num">'+w.within_3x_pct+'%</td><td class="num">'+w.spearman+'</td></tr>';}).join('');
  return'<section class="lede"><h1>Method: one curve, tested blind</h1><p>The model was chosen by its out-of-sample numbers, not by preference. Terms the blind test did not keep — tenure, chain breadth, a launch-odds multiplier — are not in the formula; launch odds are never multiplied into implied value — they weight the slice into expected net instead.</p></section>'
- +'<div class="grid"><section class="panel"><h2>Formula ('+esc(D.model_version)+')</h2><div class="formula">log10(implied) = '+D.fit.a.toFixed(4)+' + '+D.fit.b.toFixed(4)+' · log10(TVL / $100M)<br>+ category offset (shrunk, k='+D.model.cat_shrinkage_k+') + '+D.model.growth_weight_log10+' · clamp(7d change, '+D.model.growth_floor+', '+D.model.growth_cap+') / 100<br>× sibling multiplier (×0.5 if kin-linked, else ×1)<br>implied = max(1, round(10 ^ log10(implied) × sibling))</div><dl class="kv"><dt>Fit</dt><dd>Huber (IRLS, 60 iters)</dd><dt>Peers</dt><dd>'+V.fit_peers+' (23 excluded)</dd><dt>Band</dt><dd>LOO residuals: P25–P75 ×'+Math.pow(10,V.loo_residual_quantiles.p25).toFixed(3)+'–×'+Math.pow(10,V.loo_residual_quantiles.p75).toFixed(2)+'</dd><dt>Rank range</dt><dd>200 bootstrap refits</dd></dl><h3 style="margin-top:14px">Farm assumptions (stated, not snapshot facts)</h3><ul class="tight"><li>Airdrop share 10% of implied value if it launches. No dilution haircut: the slice is conditional on launch. Net is expected value: launch odds × slice − costs; launch odds are never multiplied into implied value.</li><li>Hold 45 days; transactions counted per action — fund 1, approve USDC on EVM chains 1, deposit 1, claim 1, withdraw 1 (5 on EVM, 4 elsewhere); no weekly transaction is charged, because the snapshot records no points program. Gas Ethereum $5.00, L2 $0.50, Solana $0.10, other $1.00.</li><li>Forgone yield: T-bill 4.5% p.a. minus the yield the farmed position itself earns — 3.5% a year for vault, lending, liquidity, RWA, basis, perps, restake, staking and CeDeFi positions, 0% where the position earns nothing — over 45 days.</li><li>Work 2.17 h (5 + 15 + 60 + 10 + 15 + 10 + 5 + 10 min). ROBUST if expected net > 0 at the band’s low end (P25), FARM if > 0 at the point value, THIN if > 0 only at the high end (P75), else SKIP.</li><li>Slice = 10% × implied × deposit / TVL. Expected net = launch odds × slice − fees − forgone. Break-even odds = costs / slice.</li><li>No points program is claimed: the snapshot records none, so every plan says to check the protocol’s own page.</li></ul></section>'
+ +'<div class="grid"><section class="panel"><h2>Formula ('+esc(D.model_version)+')</h2><div class="formula">log10(implied) = '+D.fit.a.toFixed(4)+' + '+D.fit.b.toFixed(4)+' · log10(TVL / $100M)<br>+ category offset (shrunk, k='+D.model.cat_shrinkage_k+') + '+D.model.growth_weight_log10+' · clamp(7d change, '+D.model.growth_floor+', '+D.model.growth_cap+') / 100<br>× sibling multiplier (×0.5 if kin-linked, else ×1)<br>implied = max(1, round(10 ^ log10(implied) × sibling))</div><dl class="kv"><dt>Fit</dt><dd>Huber (IRLS, 60 iters)</dd><dt>Peers</dt><dd>'+V.fit_peers+' (23 excluded)</dd><dt>Band</dt><dd>LOO residuals: P25–P75 ×'+Math.pow(10,V.loo_residual_quantiles.p25).toFixed(3)+'–×'+Math.pow(10,V.loo_residual_quantiles.p75).toFixed(2)+'</dd><dt>Rank range</dt><dd>200 bootstrap refits</dd></dl><h3 style="margin-top:14px">Farm assumptions (stated, not snapshot facts)</h3><ul class="tight"><li>Airdrop share 10% of implied value if it launches. No dilution haircut: the slice is conditional on launch. Net is expected value: launch odds × slice − costs; launch odds are never multiplied into implied value.</li><li>Hold 45 days; transactions counted per action — fund 1, approve USDC on EVM chains 1, deposit 1, claim 1, withdraw 1 (5 on EVM, 4 elsewhere); no weekly transaction is charged, because the snapshot records no points program. Gas Ethereum $5.00, L2 $0.50, Solana $0.10, other $1.00.</li><li>Forgone yield: T-bill 4.5% p.a. minus the yield the farmed position itself earns — 3.5% a year for vault, lending, liquidity, RWA, basis, perps, restake, staking and CeDeFi positions, 0% where the position earns nothing — over 45 days.</li><li>Work 2.17 h (5 + 15 + 60 + 10 + 15 + 10 + 5 + 10 min). ROBUST if expected net > 0 at the band’s low end (P25), FARM if > 0 at the point value, THIN if > 0 only at the high end (P75), else SKIP.</li><li>Slice = 10% × implied × deposit / TVL. Expected net = launch odds × slice − fees − forgone. Break-even odds = costs / slice.</li><li>Pays from: the smallest ticket whose expected net is zero — fees / (launch odds × share × implied / TVL − net forgone rate). Gas is fixed, forgone yield scales with the deposit; '+D.rows.filter(function(r){return r.farm.pays_from_usd==null;}).length+' rows never pay at the defaults.</li><li>The Board tab’s airdrop-share (5% / 10% / 20%) and T-bill (0% / 4% / 8%) switchers reprice every row from the same formula, client-side; at 10% / 4.5% the page shows the server’s own numbers exactly.</li><li>No points program is claimed: the snapshot records none, so every plan says to check the protocol’s own page.</li></ul></section>'
  +'<section class="panel"><h2>Out-of-sample detail</h2><dl class="kv"><dt>LOO (n='+V.loo.n+')</dt><dd>×'+V.loo.median_miss_x+' · '+V.loo.within_3x_pct+'% in 3× · ρ '+V.loo.spearman+'</dd><dt>Flat multiple LOO</dt><dd>×'+V.flat.loo.median_miss_x+' · '+V.flat.loo.within_3x_pct+'% in 3× · ρ '+V.flat.loo.spearman+'</dd><dt>Walk-forward mean</dt><dd>×'+V.walk_forward.mean_median_miss_x+' · '+V.walk_forward.mean_within_3x_pct+'% in 3× · ρ '+V.walk_forward.mean_spearman+'</dd><dt>Flat walk-forward</dt><dd>×'+V.flat.walk_forward_mean_median_miss_x+' · '+V.flat.walk_forward_mean_within_3x_pct+'% in 3×</dd><dt>Band coverage</dt><dd>P25–P75 '+V.bands.p25_75_coverage_pct+'% · P10–P90 '+V.bands.p10_90_coverage_pct+'%</dd></dl><h3 style="margin-top:14px">Walk-forward cutoffs</h3><table><thead><tr><th>Cutoff</th><th class="num">Train / test</th><th class="num">Miss</th><th class="num">In 3×</th><th class="num">ρ</th></tr></thead><tbody>'+wrows+'</tbody></table></section></div>'
- +'<div class="grid2" style="margin-top:14px"><section class="panel"><h2>Fit methods compared</h2><table><thead><tr><th>Method</th><th class="num">LOO miss</th><th class="num">In 3×</th><th class="num">ρ</th><th class="num">WF miss</th></tr></thead><tbody>'+mrows+'</tbody></table></section>'
- +'<section class="panel"><h2>Ablation (Huber, 105 peers)</h2><table><thead><tr><th>Variant</th><th class="num">LOO miss</th><th class="num">In 3×</th><th class="num">ρ</th><th class="num">WF miss</th></tr></thead><tbody>'+arows+'</tbody></table><p class="note">Category offsets at k=100 cost almost nothing in LOO (×3.18 curve-only → ×3.22 with offsets) and the growth term brings the final model to ×3.09; tenure, breadth and launch-odds multipliers were dropped because the blind test rejected them.</p></section></div>';}
+ +'<div class="grid2" style="margin-top:14px"><section class="panel"><h2>Fit methods compared</h2><table><thead><tr><th>Method</th><th class="num">LOO miss</th><th class="num">In 3×</th><th class="num">ρ</th><th class="num">WF miss</th><th class="num">WF in 3×</th></tr></thead><tbody>'+mrows+'</tbody></table></section>'
+ +'<section class="panel"><h2>Ablation (Huber, 105 peers)</h2><table><thead><tr><th>Variant</th><th class="num">LOO miss</th><th class="num">In 3×</th><th class="num">ρ</th><th class="num">WF miss</th><th class="num">WF in 3×</th></tr></thead><tbody>'+arows+'</tbody></table><p class="note">Category offsets at k=100 cost almost nothing in LOO (×3.18 curve-only → ×3.22 with offsets) and the growth term brings the final model to ×3.09; tenure, breadth and launch-odds multipliers were dropped because the blind test rejected them.</p></section></div>';}
 function setasideView(){var A=D.accounting;
  return'<section class="lede"><h1>Set aside: where the other 560 protocols go</h1><p>758 = '+A.ranked+' ranked + '+A.traded+' already trade + '+A.set_aside+' set aside. Nothing is dropped silently.</p></section>'
  +'<div class="grid2"><section class="panel"><h2>Set aside: 144 pre-token protocols</h2><p class="sub">Each fails the watchlist rule. Counts are the snapshot audit in MODEL.md §(a); the per-reason split is not a field in data.js.</p><table><thead><tr><th>Reason</th><th class="num">Protocols</th></tr></thead><tbody>'+SETASIDE.map(function(x){return'<tr><td>'+esc(x[0])+'</td><td class="num">'+x[1]+'</td></tr>';}).join('')+'<tr><td><b>Total set aside</b></td><td class="num"><b>144</b></td></tr></tbody></table></section>'
  +'<section class="panel"><h2>Ranked: 198</h2><dl class="kv"><dt>Watchlist (≥ $50M, no token)</dt><dd>40</dd><dt>Above the floor, not watchlist</dt><dd>20</dd><dt>Early, below the floor</dt><dd>138</dd><dt>Already trade (kept apart)</dt><dd>416</dd><dt>Total accounted</dt><dd>758</dd></dl><h3 style="margin-top:14px">Why the rule excludes them</h3><ul class="tight"><li>CEX, Bridge and Canonical Bridge tokens price an exchange or a bridge, not a protocol’s own token — the same categories are excluded from the fit.</li><li>Liquid Staking / Liquid Restaking / Restaked BTC and wrapped or staked names are a product of a token that already trades.</li><li>Versioned names (V2, 2.0, …) are a pool of another protocol, not a standalone one.</li><li>Seven rows share a first word with a protocol whose token already trades — Mezo Earn, Flying Tulip ftUSD, GMX Solana, Kava Mint, Manta CeDeFi, MetalX Swap, Solv Strategies — and are valued at ×0.5: two products of one project would share one launch. The rule is computed from the snapshot, not a hardcoded list.</li></ul></section></div>';}
-function detail(r){var f=r.farm;var run1=r.size_curve_usd,run2=Math.round(run1*r.category_multiplier),run3=Math.round(run2*r.growth_multiplier);
+function detail(r){var f0=r.farm;
+ var mk=function(dep){return S.share===0.1&&S.tbill===0.045?r.farm.sizes[DEP[dep]]:price(r,dep,S.share,S.tbill);};
+ var m=mk(1000);
+ var f={verdict:m.verdict,slice_usd:m.slice_usd,tx_count:f0.tx_count,gas_usd_per_tx:f0.gas_usd_per_tx,fees_usd:m.fees_usd,forgone_usd:m.forgone_usd,forgone_rate:S.tbill-f0.position_yield_rate,position_yield_rate:f0.position_yield_rate,total_cost_usd:m.total_cost_usd,net_usd:m.net_usd,breakeven_odds:m.breakeven_odds,hours:f0.hours,net_per_hour_usd:m.net_usd/f0.hours,stop_tvl_usd:f0.stop_tvl_usd,exit_tvl_usd:f0.exit_tvl_usd,sizes:[500,1000,5000,10000].map(mk),steps:f0.steps};
+ var run1=r.size_curve_usd,run2=Math.round(run1*r.category_multiplier),run3=Math.round(run2*r.growth_multiplier);
  var sibRow=r.sibling_multiplier!==1?'<div><span>Sibling ×0.5 — shares a first word with a token that trades</span><b>'+usd(Math.round(run3*r.sibling_multiplier))+'</b></div>':'';
  var comps=r.nearest_comps.map(function(c){return'<tr><td class="name"><b>'+esc(c.name)+'</b><span>'+esc(c.category||'Other')+'</span></td><td class="num">'+usd(c.tvl_usd)+'</td><td class="num">'+usd(c.mcap_usd)+'</td><td class="num">'+(c.mcap_usd/c.tvl_usd).toFixed(3)+'×</td><td class="num">'+usd(c.model_usd)+'</td><td class="num">×'+c.miss_x.toFixed(2)+'</td></tr>';}).join('');
  var steps=f.steps.map(function(s){return'<li><b>'+esc(s.text)+'</b><span class="cost">'+esc(s.cost)+' · '+esc(s.time)+' · $'+s.cost_usd.toFixed(2)+' · '+s.time_min+' min</span></li>';}).join('');
@@ -130,18 +204,19 @@ function detail(r){var f=r.farm;var run1=r.size_curve_usd,run2=Math.round(run1*r
  +'<div><span>Category offset '+(r.category_offset_log10>=0?'+':'')+r.category_offset_log10.toFixed(4)+' log10 → ×'+r.category_multiplier.toFixed(3)+'</span><b>'+usd(run2)+'</b></div>'
  +'<div><span>7-day growth '+pct(r.change_7d)+' → ×'+r.growth_multiplier.toFixed(3)+'</span><b>'+usd(run3)+'</b></div>'
  +sibRow
- +'<div><span>Implied value</span><b>'+usd(r.implied_value_usd)+'</b></div>'
+ +'<div><span>Implied value if launched</span><b>'+usd(r.implied_value_usd)+'</b></div>'
+ +'<div><span>Expected value (launch odds '+odds(r.launch_odds)+' × if launched)</span><b>'+usd(Math.round(r.launch_odds*r.implied_value_usd))+'</b></div>'
  +'<div><span>Blind band P25–P75</span><b>'+usd(r.implied_p25_usd)+' – '+usd(r.implied_p75_usd)+'</b></div>'
  +'<div><span>Blind band P10–P90</span><b>'+usd(r.implied_p10_usd)+' – '+usd(r.implied_p90_usd)+'</b></div></div>'
  +'<p class="note">Running values are rounded; the product of the full-precision factors is the board value. The band is the point value times the leave-one-out residual quantiles — it holds about 50% (P25–P75) and 80% (P10–P90) of traded peers’ real caps.</p></section>'
  +'<section class="dsec"><h3>Nearest traded comps</h3><table><thead><tr><th>Protocol</th><th class="num">TVL</th><th class="num">Mcap</th><th class="num">Mcap/TVL</th><th class="num">Model says</th><th class="num">Miss</th></tr></thead><tbody>'+comps+'</tbody></table><p class="note">Closest by TVL, same category first. Miss is max(actual/model, model/actual) — how far the curve is off that peer.</p></section>'
- +'<section class="dsec"><h3>Farm plan — $1,000 for 45 days ' +fmtV(f.verdict)+'</h3><div class="tot">'
- +'<div><span>Slice if it launches</span><b>'+usd2(f.slice_usd)+'</b></div><div><span>Fees ('+f.tx_count+' tx × '+usd2(f.gas_usd_per_tx)+')</span><b>'+usd2(f.fees_usd)+'</b></div><div><span>Forgone net (T-bill 4.5% − position yield '+(f.position_yield_rate*100).toFixed(1)+'%)</span><b>'+usd2(f.forgone_usd)+'</b></div><div><span>Total cost</span><b>'+usd2(f.total_cost_usd)+'</b></div>'
- +'<div><span>Expected net</span><b>'+usd2(f.net_usd)+'</b></div><div><span>Break-even odds</span><b>'+be(f.breakeven_odds)+'</b></div><div><span>Net per hour ('+f.hours+' h)</span><b>'+usd2(f.net_per_hour_usd)+'/h</b></div><div><span>Net basis</span><b>expected value (odds × slice − costs)</b></div></div>'
+ +'<section class="dsec"><h3>Farm plan — $1,000 for 45 days ' +fmtV(f.verdict)+'</h3><p class="sub">At '+(S.share*100).toFixed(0)+'% airdrop share and '+(S.tbill*100).toFixed(1)+'% T-bill. Change them on the Board tab to reprice this plan.</p><div class="tot">'
+ +'<div><span>Slice if it launches</span><b>'+usd2(f.slice_usd)+'</b></div><div><span>Fees ('+f.tx_count+' tx × '+usd2(f.gas_usd_per_tx)+')</span><b>'+usd2(f.fees_usd)+'</b></div><div><span>Forgone net (T-bill '+(S.tbill*100).toFixed(1)+'% − position yield '+(f.position_yield_rate*100).toFixed(1)+'%)</span><b>'+usd2(f.forgone_usd)+'</b></div><div><span>Total cost</span><b>'+usd2(f.total_cost_usd)+'</b></div>'
+ +'<div><span>Expected net</span><b>'+usd2(f.net_usd)+'</b></div><div><span>Break-even odds</span><b>'+be(f.breakeven_odds)+'</b></div><div><span>Net per hour ('+f.hours+' h)</span><b>'+usd2(f.net_per_hour_usd)+'/h</b></div><div><span>Pays from</span><b>'+paysUsd(paysFrom(r))+'</b></div><div><span>Net basis</span><b>expected value (odds × slice − costs)</b></div></div>'
  +'<ol class="steps">'+steps+'</ol>'
  +'<h3 style="margin-top:14px">Same plan at other sizes</h3><table><thead><tr><th class="num">Deposit</th><th class="num">Slice if launch</th><th class="num">Cost</th><th class="num">Expected net</th><th class="num">Break-even</th><th>Verdict</th></tr></thead><tbody>'+sizes+'</tbody></table>'
- +'<p class="note">Stop rule: if TVL closes below '+usd(f.stop_tvl_usd)+' (80% of TVL at deposit) at week 4, withdraw half the same day. Exit below '+usd(f.exit_tvl_usd)+' (50%). Slice = 10% × implied × deposit / TVL. Net is expected value: launch odds × slice − fees − forgone.</p></section>';
- if(!dlg.open)dlg.showModal();}
+ +'<p class="note">Stop rule: if TVL closes below '+usd(f.stop_tvl_usd)+' (80% of TVL at deposit) at week 4, withdraw half the same day. Exit below '+usd(f.exit_tvl_usd)+' (50%). Slice = '+(S.share*100).toFixed(0)+'% × implied × deposit / TVL. Net is expected value: launch odds × slice − fees − forgone. Pays from is the smallest ticket whose expected net is zero — “never” when the forgone yield alone outruns the expected slice per dollar.</p></section>';
+ if(!dlg.open)dlg.showModal();dlg.scrollTop=0;}
 function render(){readHash();var h='';
  h+=header()+nav();
  if(S.view==='board'){h+=controls()+board();}
@@ -156,7 +231,7 @@ function render(){readHash();var h='';
  if(S.p){var r=D.rows.filter(function(x){return x.slug===S.p;})[0];if(r)detail(r);else if(dlg.open)dlg.close();}
  else if(dlg.open)dlg.close();}
 function drawChart(){var cv=document.getElementById('chart');if(!cv)return;var ctx=cv.getContext('2d');var W=cv.width,H=cv.height;ctx.clearRect(0,0,W,H);
- var pts=D.live.filter(function(r){return r.mcap_usd&&r.tvl_usd>0;});
+ var pts=D.peer_points.filter(function(r){return r.mcap_usd&&r.tvl_usd>0;});
  var xs=D.rows.map(function(r){return r.tvl_usd;}).concat(pts.map(function(r){return r.tvl_usd;}));
  var ys=D.rows.map(function(r){return r.implied_value_usd;}).concat(pts.map(function(r){return r.mcap_usd;}));
  var x0=Math.floor(Math.log10(Math.min.apply(null,xs))),x1=Math.ceil(Math.log10(Math.max.apply(null,xs)));
@@ -172,17 +247,20 @@ function drawChart(){var cv=document.getElementById('chart');if(!cv)return;var c
  ctx.beginPath();for(var k=0;k<=40;k++){var tv3=Math.pow(10,x0+(x1-x0)*k/40);var v3=Math.pow(10,D.fit.a+D.fit.b*Math.log10(tv3/1e8));if(k===0)ctx.moveTo(X(tv3),Y(v3));else ctx.lineTo(X(tv3),Y(v3));}
  ctx.strokeStyle='#0b4fd6';ctx.lineWidth=2;ctx.stroke();ctx.lineWidth=1;
  ctx.fillStyle='rgba(11,79,214,.45)';D.rows.forEach(function(r){ctx.beginPath();ctx.arc(X(r.tvl_usd),Y(r.implied_value_usd),2,0,7);ctx.fill();});
- ctx.fillStyle='#137a4b';pts.forEach(function(r){ctx.beginPath();ctx.arc(X(r.tvl_usd),Y(r.mcap_usd),3.5,0,7);ctx.fill();});
- ctx.fillStyle='#0e1b2e';ctx.textAlign='left';ctx.font='11px monospace';ctx.fillText('— curve  — P25–P75 band   ● traded   ● board',48,20);}
-document.addEventListener('click',function(e){var t=e.target.closest('[data-view],[data-sort],[data-tier],[data-verdict],[data-dep],[data-close],[data-clear],tr[data-slug]');
+ ctx.fillStyle='#137a4b';pts.forEach(function(r){ctx.beginPath();ctx.arc(X(r.tvl_usd),Y(r.mcap_usd),2.5,0,7);ctx.fill();});
+ ctx.fillStyle='#0e1b2e';ctx.textAlign='left';ctx.font='11px monospace';ctx.fillText('— curve  — P25–P75 band   ● traded ('+pts.length+' peers)   ● board',48,20);}
+document.addEventListener('click',function(e){var t=e.target.closest('[data-view],[data-sort],[data-tier],[data-verdict],[data-dep],[data-share],[data-tbill],[data-csv],[data-close],[data-clear],tr[data-slug]');
  if(!t)return;
  if(t.hasAttribute('data-view')){S.view=t.getAttribute('data-view');S.p=null;writeHash();render();}
  else if(t.hasAttribute('data-sort')){var k=t.getAttribute('data-sort');if(S.sort===k)S.desc=!S.desc;else{S.sort=k;S.desc=true;}writeHash();render();}
  else if(t.hasAttribute('data-tier')){S.tier=t.getAttribute('data-tier');writeHash();render();}
  else if(t.hasAttribute('data-verdict')){S.verdict=t.getAttribute('data-verdict');writeHash();render();}
  else if(t.hasAttribute('data-dep')){S.dep=+t.getAttribute('data-dep');writeHash();render();}
+ else if(t.hasAttribute('data-share')){S.share=+t.getAttribute('data-share');writeHash();render();}
+ else if(t.hasAttribute('data-tbill')){S.tbill=+t.getAttribute('data-tbill');writeHash();render();}
+ else if(t.hasAttribute('data-csv')){exportCSV();}
  else if(t.hasAttribute('data-close')){dlg.close();}
- else if(t.hasAttribute('data-clear')){S.q='';S.cat='all';S.chain='all';S.tier='all';S.verdict='all';writeHash();render();}
+ else if(t.hasAttribute('data-clear')){S.q='';S.cat='all';S.chain='all';S.tier='all';S.verdict='all';S.share=0.1;S.tbill=0.045;writeHash();render();}
  else if(t.getAttribute('data-slug')){S.p=t.getAttribute('data-slug');writeHash();render();}});
 document.addEventListener('input',function(e){if(e.target.id==='q'){S.q=e.target.value;writeHash();var pos=e.target.selectionStart;render();var n=document.getElementById('q');if(n){n.focus();n.setSelectionRange(pos,pos);}}});
 document.addEventListener('change',function(e){if(e.target.id==='cat'){S.cat=e.target.value;writeHash();render();}if(e.target.id==='chain'){S.chain=e.target.value;writeHash();render();}});

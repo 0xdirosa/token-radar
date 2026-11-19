@@ -1,4 +1,4 @@
-# Token Radar — Model Implied Value & Farm Plan (MODEL v5, `radar-5`)
+# Token Radar — Model Implied Value & Farm Plan (MODEL v6, `radar-6`)
 
 Analisis untuk bounty make.fun **token-radar-01** ($1.325). Snapshot:
 `input/snapshot.json`, `as_of` **2026-11-14**, floor watchlist
@@ -8,20 +8,26 @@ submit, bukan tanda tangan apa pun. Semua angka di sini dihitung dari
 snapshot yang sama oleh `lib/model.ts` (`buildRadar` → `data.js` →
 `validation`); tidak ada angka yang ditulis tangan dari luar snapshot.
 
-**Ringkasan keputusan:** model `radar-5` = **kurva ukuran log-log fitted
+**Ringkasan keputusan:** model `radar-6` = **kurva ukuran log-log fitted
 (Huber) pada token yang sudah diperdagangkan** × **offset kategori yang
 di-shrink kuat (k=100)** × **growth 7 hari kecil** × **haircut sibling
 ×0,5 untuk 7 baris kin-linked** × **ekonomi farm expected-value
 (launch odds × slice − biaya) dengan hold 45 hari dan transaksi
-dihitung per aksi**. Board **N = 198** (40 watchlist + 20 di atas
+dihitung per aksi**. Fit TIDAK BERUBAH dari `radar-5`: tidak satu pun
+konstanta model disentuh — blind test 19 Nov 2026 menguji ~20 varian
+(offset k=3–200, bobot growth 0,05–0,30, tenure, breadth, peer set
+kecil, ensemble, piecewise, two-pass, market-relative growth,
+odds × implied) dan tidak satu pun memperbaiki LOO dan walk-forward
+bersama (LOO ×3,09 / WF ×2,40 dipertahankan). Yang berubah di
+`radar-6` hanya presentasi dan ekonomi farm yang diturunkan dari angka
+yang sudah ada — lihat "Dibanding `radar-5`" di bawah. Board **N = 198** (40 watchlist + 20 di atas
 floor di luar watchlist + 138 early di bawah floor). Nilai top
 **$59,9 juta** (Sentora Curator), median **$6,76 juta**, minimum
 **$1,78 juta** (Flying Tulip ftUSD, setelah haircut sibling),
 monotonik menurun, 198 nilai berbeda. Validasi out-of-sample: LOO
 miss **×3,09** vs flat **×5,02**; walk-forward **×2,40** vs flat
-**×4,83** — fit tidak berubah dari `radar-4`, jadi angka validasi
-sama; yang berubah adalah ekonomi farm dan haircut sibling. Band per
-baris adalah *blind band* dari residual LOO; rank range dari 200
+**×4,83** — sama seperti `radar-4`/`radar-5`, karena fit tidak berubah.
+Band per baris adalah *blind band* dari residual LOO; rank range dari 200
 bootstrap refits. Farm: **61 ROBUST / 54 FARM / 62 THIN / 21 SKIP**
 pada $1.000; **125 ROBUST / 54 FARM / 18 THIN / 1 SKIP** pada
 $10.000.
@@ -48,6 +54,37 @@ yang dinyatakan di §(e) beserta kontrafaktualnya; bukan perubahan
 diam-diam. Dua kandidat lain **diuji dan ditolak** oleh blind test:
 menghapus suku growth (LOO ×3,22, memburuk) dan 94 comps + k=3
 (LOO ×3,85, memburuk jelas) — lihat §(c).
+
+Dibanding `radar-5` (MODEL v6): delapan perubahan, semuanya presentasi
+atau ekonomi yang diturunkan dari angka yang sudah ada — fit, ranking,
+dan board TIDAK BERUBAH. **(P1)** Board menampilkan kolom ODDS, kolom
+"implied if launched" (nilai kondisional — sama dengan implied yang
+selalu dipakai), dan kolom expected value (odds × if launched); ranking
+tetap berdasarkan nilai kondisional. **(P2)** Cover menampilkan tabel
+ablasi bertahap (flat → kurva → +growth → +kategori → final, tiap baris
+LOO + WF + within-3×). **(P3)** Cover menampilkan panel analisis
+tenure/launch-odds: odds per bucket umur (0–6 bln 26,4% · 6–12 bln
+39,7% · 1–2 thn 38,3% · 2–3 thn 54,7% · 3–4 thn 78,7% · 4+ thn 79,7% ·
+umur tak diketahui 78,8%) plus hit-rate held-out 67,94% (515/758,
+prediksi status token dari bucket odds leave-one-out, ambang 0,5) vs
+base rate 54,88% — ditampilkan apa adanya; umur tetap TIDAK masuk
+rumus nilai karena blind test menolaknya (LOO ×3,51). **(P4)** Tiap
+baris menampilkan "pays from $X": tiket minimum agar expected net = 0,
+diselesaikan dari ekonomi yang sama (gas tetap + forgone ∝ deposit);
+11 baris tidak pernah membayar pada asumsi default. **(P5)** Switcher
+what-if airdrop share (5%/10%/20%) dan T-bill (0%/4%/8%) di samping
+switcher deposit; semua angka dihitung ulang client-side dari rumus
+yang sama (pada default 10%/4,5% tampil angka server persis) — plus
+Export CSV untuk baris terfilter. **(P6)** Detail view membuka
+build-up + band + nearest comps dulu, farm plan sesudahnya (urutan
+konten sudah begitu di `radar-5`; yang diperbaiki adalah dialog dibuka
+pada scroll teratas agar frame pertama memang menampilkannya). **(P7)**
+Filtered view menampilkan agregat farm book ("farming all N ROBUST /
+FARM rows at $1K nets +$X for Y h"). **(P12)** Scatter cover memplot
+seluruh 105 peer, bukan hanya 24 terbesar. Yang TIDAK dibangun:
+ranking odds-weighted (P1a) — ditolak blind test (LOO ×3,71, WF ×4,05)
+dan menunggu keputusan parent; dollar-days time share; hold bervariasi
+per baris; offset kategori besar (k=3, LOO ×3,88).
 
 ---
 
@@ -125,7 +162,7 @@ murni, tanpa klaim kategori.
 
 ---
 
-## (c) Formula model `radar-5`
+## (c) Formula model `radar-6`
 
 ### Formula
 
@@ -481,30 +518,31 @@ ada datanya.
 
 ---
 
-## (f) Hasil model — validasi, top 20 & sebaran nilai (N = 198, `radar-5`)
+## (f) Hasil model — validasi, top 20 & sebaran nilai (N = 198, `radar-6`)
 
 ### Perbandingan metode fit (LOO n=105; WF = rata-rata 3 cutoff)
 
-| Metode | Varian | LOO miss | LOO within-3× | LOO ρ | WF miss |
-|---|---|---|---|---|---|
-| OLS | curve-only | ×3,27 | 47,62% | 0,33 | ×2,53 |
-| OLS | curve+category | ×3,30 | 45,71% | 0,33 | ×2,53 |
-| **Huber** | **curve-only** | **×3,18** | **47,62%** | **0,34** | **×2,38** |
-| **Huber** | **curve+category** | ×3,22 | 47,62% | 0,34 | ×2,38 |
-| Theil–Sen | curve-only | ×3,19 | 43,81% | 0,30 | ×2,52 |
-| Theil–Sen | curve+category | ×3,25 | 44,76% | 0,31 | ×2,52 |
+| Metode | Varian | LOO miss | LOO within-3× | LOO ρ | WF miss | WF within-3× |
+|---|---|---|---|---|---|---|
+| OLS | curve-only | ×3,27 | 47,62% | 0,33 | ×2,53 | 51,46% |
+| OLS | curve+category | ×3,30 | 45,71% | 0,33 | ×2,53 | 51,46% |
+| **Huber** | **curve-only** | **×3,18** | **47,62%** | **0,34** | **×2,38** | **52,55%** |
+| **Huber** | **curve+category** | ×3,22 | 47,62% | 0,34 | ×2,38 | 52,55% |
+| Theil–Sen | curve-only | ×3,19 | 43,81% | 0,30 | ×2,52 | 49,82% |
+| Theil–Sen | curve+category | ×3,25 | 44,76% | 0,31 | ×2,52 | 50,36% |
 
 ### Ablasi (Huber, 105 peer)
 
-| Varian | LOO miss | LOO within-3× | LOO ρ | WF miss |
-|---|---|---|---|---|
-| curve-only | ×3,18 | 47,62% | 0,34 | ×2,38 |
-| curve+category | ×3,22 | 47,62% | 0,34 | ×2,38 |
-| **curve+category+growth (final)** | **×3,09** | **47,62%** | **0,34** | **×2,40** |
-| curve+category+tenure | ×3,51 | 44,76% | 0,34 | ×2,36 |
-| curve+category+breadth | ×3,70 | 43,81% | 0,32 | ×2,25 |
-| curve+category+growth+tenure+breadth | ×3,88 | 42,86% | 0,32 | ×2,21 |
-| curve+category × launch-odds | ×3,71 | 40,00% | 0,27 | ×4,05 |
+| Varian | LOO miss | LOO within-3× | LOO ρ | WF miss | WF within-3× |
+|---|---|---|---|---|---|
+| curve-only | ×3,18 | 47,62% | 0,34 | ×2,38 | 52,55% |
+| curve+growth | ×3,12 | 48,57% | 0,34 | ×2,40 | 52,55% |
+| curve+category | ×3,22 | 47,62% | 0,34 | ×2,38 | 52,55% |
+| **curve+category+growth (final)** | **×3,09** | **47,62%** | **0,34** | **×2,40** | **53,10%** |
+| curve+category+tenure | ×3,51 | 44,76% | 0,34 | ×2,36 | 52,00% |
+| curve+category+breadth | ×3,70 | 43,81% | 0,32 | ×2,25 | 52,55% |
+| curve+category+growth+tenure+breadth | ×3,88 | 42,86% | 0,32 | ×2,21 | 52,00% |
+| curve+category × launch-odds | ×3,71 | 40,00% | 0,27 | ×4,05 | 32,24% |
 
 **Penolakan blind 18 Nov 2026 (kandidat `radar-5`, C3 & C6).**
 Dua kandidat diuji dengan harness blind yang sama (LOO + WF pada
@@ -523,7 +561,7 @@ menyentuh fit, jadi LOO/WF `radar-5` sama dengan `radar-4`.
 
 | | LOO miss | LOO within-3× | LOO ρ | WF miss | WF within-3× |
 |---|---|---|---|---|---|
-| **radar-5 (final)** | **×3,09** | **47,62%** | **0,34** | **×2,40** | **53,10%** |
+| **radar-6 (final)** | **×3,09** | **47,62%** | **0,34** | **×2,40** | **53,10%** |
 | Flat multiple | ×5,02 | 35,24% | 0,37 | ×4,83 | 37,30% |
 
 Walk-forward final per cutoff — fit pada `listed_at` lama, uji pada
@@ -686,8 +724,8 @@ check` dijalankan terpisah setelah rebuild final.
 
 ## Catatan untuk builder (dashboard)
 
-1. Ganti `MODEL` dengan konstanta `radar-5` di atas; naikkan
-   `MODEL_VERSION` ke `radar-5`. Konstanta fit (a, b, offsets)
+1. Ganti `MODEL` dengan konstanta `radar-6` di atas; naikkan
+   `MODEL_VERSION` ke `radar-6`. Konstanta fit (a, b, offsets)
    dihitung dari snapshot saat run — jangan hardcode angka §c ke
    dashboard; baca dari `data.js` → `fit`.
 2. Tampilkan per baris: build-up (kurva × ×Kat × ×Growth × ×Sib =
@@ -714,6 +752,7 @@ check` dijalankan terpisah setelah rebuild final.
    sendiri: semua konstanta (§c, §e) adalah bagian dari model dan
    ditampilkan di dashboard.
 
-*Disusun 2026-11-18 dari `snapshot.json` as_of 2026-11-14 (MODEL v5,
-`radar-5`). Tidak ada data luar snapshot yang dipakai; tidak ada nama
-protokol yang di-hardcode dalam model.*
+*Disusun 2026-11-18 dari `snapshot.json` as_of 2026-11-14, diperbarui
+2026-11-19 ke MODEL v6 (`radar-6`, fit tidak berubah). Tidak ada data
+luar snapshot yang dipakai; tidak ada nama protokol yang di-hardcode
+dalam model.*
